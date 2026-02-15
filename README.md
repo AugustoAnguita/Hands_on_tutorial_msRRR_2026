@@ -1,8 +1,8 @@
-# 🌟 Unveiling the Exposome through Outcome-Wide Analysis: The msRRR Pipeline
+# Unveiling the Exposome through Outcome-Wide Analysis: The msRRR Pipeline
 
 **Robust Inference for High-Dimensional Exposome Data using Mixed-Response Sparse Reduced-Rank Regression and Stability Selection.**
 
-By Dr. Augusto Anguita-Ruiz
+By Dr. Augusto Anguita-Ruiz, Junior Researcher Leader at Barcelona Institute For Global Health (ISGLOBAL)
 ---
 
 ## 📖 Overview
