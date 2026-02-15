@@ -1,0 +1,4 @@
+"";"Scenario";"Seed";"Opt_Rank";"Opt_Lambda";"N_Exposures";"CV_Deviance";"pMSE_training";"pMSE_test"
+"1";"Pregnancy";12345;4;0,402936073165064;12;-648,789731481391;NA;NA
+"2";"Childhood";12345;4;0,165640633521148;19;-686,864298606437;NA;NA
+"3";"Combined";12345;4;0,144853157811507;26;-687,056729506452;NA;NA
