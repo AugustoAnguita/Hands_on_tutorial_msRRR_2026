@@ -4,7 +4,7 @@
 
 By Dr. Augusto Anguita-Ruiz, Junior Researcher Leader at Barcelona Institute For Global Health (ISGLOBAL).
 
- ▶️ YouTube Tutorial Companion: [https://youtu.be/YarXHQBGgLA?si=lyEju4WeorRApJR0](https://youtu.be/YarXHQBGgLA?si=69Vg6v2XbiCxRDpP)
+ ▶️ YouTube Tutorial Companion: https://youtu.be/YarXHQBGgLA?si=F4EX3K43nnFaqjHz&t=1
 
 ## 📖 Overview
 
