@@ -6,6 +6,8 @@ By Dr. Augusto Anguita-Ruiz, Junior Researcher Leader at Barcelona Institute For
 
  ▶️ YouTube Tutorial Companion: https://youtu.be/YarXHQBGgLA?si=F4EX3K43nnFaqjHz&t=1
 
+ [![DOI](https://zenodo.org/badge/1155530150.svg)](https://doi.org/10.5281/zenodo.19615003)
+
 ## 📖 Overview
 
 Traditional environmental epidemiology often relies on univariate regression models. However, modern exposome research faces the **"Curse of Dimensionality" ($P \gg N$)**, extreme collinearity among environmental variables, and the need to evaluate multiple, interconnected health outcomes simultaneously.
