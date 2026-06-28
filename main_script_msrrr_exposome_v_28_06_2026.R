@@ -16,7 +16,7 @@ required_packages <- c(
   "tidyverse", "rrpack", "foreach", "doParallel", 
   "pheatmap", "glmnet", "fastDummies", 
   "gridExtra", "corrplot","caret","ggrepel","reshape2","RColorBrewer","grid",
-  "doSNOW", "matrixStats", "RMTL", 
+  "doSNOW", "matrixStats", "RMTL" 
 )
 
 # Install missing packages
