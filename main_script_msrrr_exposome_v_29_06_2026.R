@@ -13,6 +13,7 @@ rm(list = ls())
 
 # Close all open graphical devices from previous/interrupted runs
 graphics.off()
+if (!is.null(dev.list())) {dev.off()}
 
 # Ssanity check
 print(dev.list())
@@ -641,12 +642,14 @@ lam_max_preg    <- (spec_norm_preg / n_obs) * 1.1 #The 1.1 factor provides a num
 # For epidemiologists, use a larger depth if you expect many small, pleiotropic effects, 
 # and a smaller depth if the goal is to identify a few dominant environmental drivers.
 lam_seq_preg <- 10^(seq(log10(lam_max_preg), log10(lam_max_preg * 1e-4), length.out = 100))
+cv.crit_preg <- "deviance"
+# cv.crit_preg <- "pMSE"
 
 fit_preg <- msrrr(
   Y = Y_train, X = X_preg_train, Z = Z_train,
   family = outcome_families, familygroup = family_mapping,
   nrankseq = 2:4, lamseq = lam_seq_preg,
-  foldid = foldid, method = 'CV', cv.criteria = "deviance", warm = TRUE
+  foldid = foldid, method = 'CV', cv.criteria = cv.crit_preg, warm = TRUE
 )
 
 
@@ -660,12 +663,14 @@ C_child         <- crossprod(X_child_train, Y_imputed)
 spec_norm_child <- svd(C_child, nu = 0, nv = 0)$d[1]
 lam_max_child   <- (spec_norm_child / n_obs) * 1.1
 lam_seq_child   <- 10^(seq(log10(lam_max_child), log10(lam_max_child * 1e-4), length.out = 100))
+cv.crit_child <- "deviance"
+# cv.crit_child <- "pMSE"
 
 fit_child <- msrrr(
   Y = Y_train, X = X_child_train, Z = Z_train,
   family = outcome_families, familygroup = family_mapping,
   nrankseq = 2:4, lamseq = lam_seq_child,
-  foldid = foldid, method = 'CV', cv.criteria = "deviance", warm = TRUE
+  foldid = foldid, method = 'CV', cv.criteria = cv.crit_child, warm = TRUE
 )
 
 # ------------------------------------------------------------------------------
@@ -681,12 +686,14 @@ C_comb          <- crossprod(X_combined_train, Y_imputed)
 spec_norm_comb  <- svd(C_comb, nu = 0, nv = 0)$d[1]
 lam_max_comb    <- (spec_norm_comb / n_obs) * 1.1
 lam_seq_comb    <- 10^(seq(log10(lam_max_comb), log10(lam_max_comb * 1e-4), length.out = 100))
+cv.crit_comb <- "deviance"
+# cv.crit_comb <- "pMSE"
 
 fit_comb <- msrrr(
   Y = Y_train, X = X_combined_train, Z = Z_train,
   family = outcome_families, familygroup = family_mapping,
   nrankseq = 2:4, lamseq = lam_seq_comb,
-  foldid = foldid, method = 'CV', cv.criteria = "deviance", warm = TRUE
+  foldid = foldid, method = 'CV', cv.criteria = cv.crit_comb, warm = TRUE
 )
 
 
@@ -705,7 +712,8 @@ results_df <- data.frame(
   Opt_Rank      = rep(NA, 3),
   Opt_Lambda    = rep(NA, 3),
   N_Exposures   = rep(NA, 3),
-  CV_Deviance   = rep(NA, 3),
+  CV_Crit_Name   = c(cv.crit_preg, cv.crit_child, cv.crit_comb),
+  CV_Crit_value   = rep(NA, 3),
   pMSE_training = rep(NA, 3),
   pMSE_test     = rep(NA, 3)
 )
@@ -717,7 +725,7 @@ fill_results <- function(row_idx, model_obj) {
   # Count selected predictors (non-zero coefficients in B matrix)
   results_df$N_Exposures[row_idx] <<- sum(rowSums(model_obj$fit$B != 0) > 0)
   # Extract the minimum deviance from the tuning path
-  results_df$CV_Deviance[row_idx] <<- unlist(model_obj$tunepath.opt)[which.min(unlist(model_obj$tunepath.opt))]
+  results_df$CV_Crit_value[row_idx] <<- unlist(model_obj$tunepath.opt)[which.min(unlist(model_obj$tunepath.opt))]
 }
 
 fill_results(1, fit_preg)
@@ -757,7 +765,7 @@ save(fit_preg, fit_child, fit_comb, results_df,
      file = "results/msrrr_objects_model_metrics_results_training_CV.RData")
 
 
-write.csv2(results_df,"results/model_metrics_results_training_CV.csv")
+write.csv2(results_df,"results/model_metrics_results_training_CV.csv", row.names = FALSE)
 
 
 # ------------------------------------------------------------------------------
@@ -767,28 +775,34 @@ write.csv2(results_df,"results/model_metrics_results_training_CV.csv")
 message(">>> [Block 7.3] Defining and generating Diagnostic Plots...")
 
 # Function to generate Rank and Lambda diagnostics for any scenario
-generate_diagnostics <- function(model_obj, scenario_name) {
+generate_diagnostics <- function(model_obj, scenario_name, cv.crit) {
   
-  # 1. Rank vs Deviance Plot
+  # 1. Rank vs selected CV metric plot
   rank_data <- data.frame(
-    Rank = model_obj$nrankseq, 
-    Deviance = unlist(model_obj$tunepath.opt)
+    Rank = model_obj$nrankseq,
+    CV_metric = unlist(model_obj$tunepath.opt)
   )
   
-  p_rank <- ggplot(rank_data, aes(x = Rank, y = Deviance)) +
+  p_rank <- ggplot(rank_data, aes(x = Rank, y = CV_metric)) +
     geom_line(color = "grey") + 
     geom_point(size = 3, color = "#08737f") +
     theme_minimal() + 
-    labs(title = paste(scenario_name, "Model: Rank vs Deviance"), 
-         subtitle = "Optimization of latent factors")
+    labs(
+      title = paste(scenario_name, "Model: Rank vs", cv.crit),
+      subtitle = "Optimization of latent factors",
+      x = "Rank",
+      y = paste("CV", cv.crit)
+    )
   
-  # 2. Lambda Boxplot (for the optimal Rank)
+  # 2. Lambda boxplot for the optimal rank
   opt_rank_name <- paste0("nrank_", model_obj$nrank)
-  # Extract fold data (removing the summary cv.mean column)
+  
+  # Extract fold data, removing the summary column
   dtplot_raw <- model_obj$Tunepath[[opt_rank_name]]
-  dtplot_folds <- t(dtplot_raw[, -ncol(dtplot_raw)]) 
+  dtplot_folds <- t(dtplot_raw[, -ncol(dtplot_raw)])
   
   colnames(dtplot_folds) <- sprintf("%.1e", model_obj$lamseq)
+  
   dtplot_long <- reshape2::melt(dtplot_folds)
   dtplot_long$Var2 <- factor(dtplot_long$Var2, levels = unique(dtplot_long$Var2))
   
@@ -798,30 +812,30 @@ generate_diagnostics <- function(model_obj, scenario_name) {
     geom_boxplot(outlier.size = 0.5) +
     scale_fill_manual(values = my_colors) +
     theme_minimal() +
-    theme(axis.text.x = element_text(angle = 90, size = 6, hjust = 1), 
-          legend.position = "none") +
-    labs(x = "Lambda (Log Scale)", y = "Deviance / Log-Likelihood", 
-         title = "Regularization Path: Error across Folds")
+    theme(
+      axis.text.x = element_text(angle = 90, size = 6, hjust = 1),
+      legend.position = "none"
+    ) +
+    labs(
+      x = "Lambda (log scale)",
+      y = paste("CV", cv.crit),
+      title = paste("Regularization path:", cv.crit, "across folds")
+    )
   
-  return(grid.arrange(p_rank, p_lambda, ncol = 1))
+  # Return as grob, without drawing immediately
+  return(gridExtra::arrangeGrob(p_rank, p_lambda, ncol = 1))
 }
 
 # Example: Generate plots for each scenario
-diag_preg  <- generate_diagnostics(fit_preg, "Pregnancy")
-diag_child <- generate_diagnostics(fit_child, "Childhood")
-diag_comb  <- generate_diagnostics(fit_comb, "Combined")
+diag_preg  <- generate_diagnostics(fit_preg, "Pregnancy", cv.crit = cv.crit_preg)
+diag_child <- generate_diagnostics(fit_child, "Childhood", cv.crit = cv.crit_child)
+diag_comb  <- generate_diagnostics(fit_comb, "Combined", cv.crit = cv.crit_comb)
 
-message("Current device before opening PDF:")
-print(dev.cur())
-print(dev.list())
 pdf("results/Model_Diagnostics_training_CV.pdf", width = 8.5, height = 11)
 plot(diag_preg)
 plot(diag_child)
 plot(diag_comb)
 dev.off()
-message("Current device after closing PDF:")
-print(dev.cur())
-print(dev.list())
 
 
 # ------------------------------------------------------------------------------
@@ -863,7 +877,12 @@ plot_coeffs <- function(model_obj, outcome_idx, X_matrix, scenario_label) {
 p_bw_comb <- plot_coeffs(fit_comb, 1, X_combined_train, "Combined")
 p_as_comb <- plot_coeffs(fit_comb, 2, X_combined_train, "Combined")
 
-
+# pdf("results/Coefficient_Lollipop_Plots_training_CV.pdf", width = 12, height = 8)
+# 
+# if(!is.null(p_bw_comb)) print(p_bw_comb)
+# if(!is.null(p_as_comb)) print(p_as_comb)
+# 
+# dev.off()
 
 
 
@@ -976,7 +995,7 @@ plot_final_heatmap <- function(model_obj, X_matrix, scenario_name) {
     breaks = get_pro_breaks(coef_subset),
     annotation_row = df_row_ann,
     cluster_cols = FALSE,
-    cluster_rows = TRUE,
+    cluster_rows = TRUE, # Set to FALSE to keep the same predictor order across plots
     border_color = "white",
     fontsize_row = 8,
     cellwidth = 30
@@ -985,29 +1004,24 @@ plot_final_heatmap <- function(model_obj, X_matrix, scenario_name) {
 
 # 8.4 Export
 # ------------------------------------------------------------------------------
-message("Current device before opening PDF:")
-print(dev.cur())
-print(dev.list())
+graphics.off()
+
 pdf("results/Exposome_Signatures_training_CV.pdf", width = 10, height = 12)
+
 plot_final_heatmap(fit_preg, X_preg_train, "Pregnancy")
+
+grid.newpage()
 plot_final_heatmap(fit_child, X_child_train, "Childhood")
 
-X_comb_train <- cbind(X_preg_train, X_child_train)
-plot_final_heatmap(fit_comb, X_comb_train, "Combined")
+grid.newpage()
+plot_final_heatmap(fit_comb, X_combined_train, "Combined")
+
 dev.off()
-message("Current device after closing PDF:")
-print(dev.cur())
-print(dev.list())
-
+graphics.off()
 message(">>> Block 8 Complete. Heatmaps updated with non-linear scale.")
-
-
 
 load("results/msrrr_objects_model_metrics_results_training_CV.RData")
 results_df <- read.csv2("results/model_metrics_results_training_CV.csv")
-
-
-
 
 
 
@@ -1116,7 +1130,7 @@ plot_final_heatmap <- function(model_obj, X_matrix, scenario_name) {
     breaks = get_pro_breaks(coef_subset),
     annotation_row = df_row_ann,
     cluster_cols = FALSE,
-    cluster_rows = TRUE,
+    cluster_rows = TRUE, # Set to FALSE to keep the same predictor order across plots
     border_color = "white",
     fontsize_row = 8,
     cellwidth = 30,
@@ -1130,9 +1144,6 @@ plot_final_heatmap <- function(model_obj, X_matrix, scenario_name) {
 # Bloque 9.3: Generar PDF Final
 # ------------------------------------------------------------------------------
 
-message("Current device before opening PDF:")
-print(dev.cur())
-print(dev.list())
 pdf("results/Exposome_Signatures_WHOLE_SAMPLE_final_prebootstrap.pdf", width = 10, height = 12)
 
 # Escenario A
@@ -1149,9 +1160,8 @@ X_comb_whole <- cbind(X_preg_whole, X_child_whole)
 plot_final_heatmap(fit_comb_whole, X_comb_whole, "Combined (Whole Sample)")
 
 dev.off()
-message("Current device after closing PDF:")
-print(dev.cur())
-print(dev.list())
+graphics.off()
+if (!is.null(dev.list())) {dev.off()}
 
 save(fit_preg_whole, fit_child_whole, fit_comb_whole, 
      file = "results/msrrr_WHOLE_SAMPLE_models.RData")
@@ -1267,7 +1277,7 @@ message(">>> [Block 10] Starting Bootstrap: Pregnancy Scenario...")
 X_boot <- X_preg_whole
 Z_boot <- Z_whole
 Y_boot <- Y_whole
-n_boot <- 500  
+n_boot <- 500
 
 # 10.2 Generate Resampling Indices
 # ------------------------------------------------------------------------------
@@ -1431,7 +1441,7 @@ message(">>> [Block 10] Starting Bootstrap: Childhood Scenario...")
 X_boot <- X_child_whole
 Z_boot <- Z_whole
 Y_boot <- Y_whole
-n_boot <- 500  
+n_boot <- 500
 
 # 10.2 Generate Resampling Indices
 # ------------------------------------------------------------------------------
@@ -1593,7 +1603,7 @@ message(">>> [Block 10] Starting Bootstrap: Combined Scenario...")
 X_boot <- X_comb_whole
 Z_boot <- Z_whole
 Y_boot <- Y_whole
-n_boot <- 500  
+n_boot <- 500
 
 # 10.2 Generate Resampling Indices
 # ------------------------------------------------------------------------------
@@ -1858,7 +1868,7 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
     breaks            = get_pro_breaks(coef_subset),# Defined in Block 8
     annotation_row    = df_row_ann,
     cluster_cols      = FALSE,
-    cluster_rows      = TRUE,
+    cluster_rows      = TRUE, # Set to FALSE to keep the same predictor order across plots
     border_color      = "white",
     fontsize_row      = 8,
     cellwidth         = 30,
@@ -1934,6 +1944,9 @@ plot_stable_signature(fit_comb_whole, res_comb_, X_comb_whole,
                       require_sign_consistency = TRUE)
 
 dev.off()
+graphics.off()
+if (!is.null(dev.list())) {dev.off()}
+
 message("Current device after closing PDF:")
 print(dev.cur())
 print(dev.list())
