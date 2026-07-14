@@ -65,9 +65,9 @@ pmse <- function(Y, mu, Phi=NULL, family, familygroup) {
 
 ## msrrr fit with prespecified nrank and lambda
 # Z include a intercept col
-msrrr.fit <- function(Y, X, Z, family, familygroup, nrank=2, lambda, init=NULL, 
-                  control=list(epsilon=1e-4, maxit=200, trace=F)){ 
-                  
+msrrr.fit <- function(Y, X, Z, family, familygroup, nrank = 2, lambda, init = NULL,
+                      control = list(epsilon = 1e-4, maxit = 200, trace = F)) {
+  
   n = nrow(Y)
   q = ncol(Y)
   p = ncol(X)
@@ -76,121 +76,212 @@ msrrr.fit <- function(Y, X, Z, family, familygroup, nrank=2, lambda, init=NULL,
   Y_mis = Y
   fg = family[familygroup]
   id.mis = which(is.na(Y))
-  r = nrank 
+  r = nrank
   
   ## get init values via ridge
-  if(is.null(init$A0)){  # use ridge to get init working Y
+  if (is.null(init$A0)) {  # use ridge to get init working Y
     C0 = matrix(NA, pz, q)
     B0 = matrix(NA, p, q)
-    for(iq in 1:q){
+    
+    for (iq in 1:q) {
       # fit0 <- glm(Y[,iq] ~ 0+Z+X, family = fg[[iq]])
-      idx = !is.na(Y_mis[,iq])
+      idx = !is.na(Y_mis[, iq])
+      
       # ridge
-      fit0 <- glmnet(cbind(Z,X)[idx,], Y[idx,iq], family=fg[[iq]], alpha=0, lambda=0.03, 
-                     intercept=F, penalty.factor=c(rep(0,pz),rep(1,p))) 
-      C0[,iq] = as.numeric(fit0$beta)[1:pz]
-      B0[,iq] = as.numeric(fit0$beta)[-c(1:pz)]
+      fit0 <- glmnet(
+        cbind(Z, X)[idx, ],
+        Y[idx, iq],
+        family = fg[[iq]],
+        alpha = 0,
+        lambda = 0.03,
+        intercept = F,
+        penalty.factor = c(rep(0, pz), rep(1, p))
+      )
+      
+      C0[, iq] = as.numeric(fit0$beta)[1:pz]
+      B0[, iq] = as.numeric(fit0$beta)[-c(1:pz)]
     }
+    
     svdB0 = svd(B0)
-    A0 = svdB0$u[,1:r,drop=F] %*% diag(svdB0$d[1:r],r,r)
-    V0 = svdB0$v[,1:r,drop=F] 
+    A0 = svdB0$u[, 1:r, drop = F] %*% diag(svdB0$d[1:r], r, r)
+    V0 = svdB0$v[, 1:r, drop = F]
+    
+    # Marco's fix 1: enforce matrix structure when rank = 1
+    if (is.null(dim(A0))) A0 <- matrix(A0, ncol = 1)
+    if (is.null(dim(V0))) V0 <- matrix(V0, ncol = 1)
+    
     init$A0 = A0
     init$V0 = V0
     init$C0 = C0
-  } else{ 
+    
+  } else {
     A0 = init$A0
     V0 = init$V0
     C0 = init$C0
-  } 
-   
+  }
+  
   B0 = A0 %*% t(V0) # plot(Bt, B0)
-  eta = (X%*%B0 + Z%*%C0) # nature parameter matrix
-  mu = matrix(NA, n, q)   # mean matrix
-  phi = rep(NA, q)        # dispersion par
-  for(iq in 1:q) mu[,iq] = fg[[iq]]$linkinv(eta[,iq])       
-  Y[id.mis] = mu[id.mis]  # Y: imputed working outcome 
-  phi = ifelse(unlist(lapply(fg, function(a) a$family))=='gaussian', colMeans((Y_mis-mu)^2,na.rm=T), 1) 
+  eta = (X %*% B0 + Z %*% C0) # nature parameter matrix
+  mu = matrix(NA, n, q)        # mean matrix
+  phi = rep(NA, q)             # dispersion par
+  
+  for (iq in 1:q) {
+    mu[, iq] = fg[[iq]]$linkinv(eta[, iq])
+  }
+  
+  Y[id.mis] = mu[id.mis]  # Y: imputed working outcome
+  
+  phi = ifelse(
+    unlist(lapply(fg, function(a) a$family)) == "gaussian",
+    colMeans((Y_mis - mu)^2, na.rm = T),
+    1
+  )
+  
   # plot(Y_mis, mu)
   
   ## scaling predictor matrix
   Kappa <- vector()
+  
   if (is.null(init$kappa)) {
-    svdX0d1 <- svd(cbind(Z,X))$d[1]
+    svdX0d1 <- svd(cbind(Z, X))$d[1]
+    
     for (j in 1:q) {
       Kappa[j] <- switch(
         fg[[j]]$family,
-        'gaussian' = svdX0d1 / phi[j],
-        'binomial' = svdX0d1 / 2,
-        'poisson' = svdX0d1 * quantile(Y_mis[,j],0.9,na.rm=T)
+        "gaussian" = svdX0d1 / phi[j],
+        "binomial" = svdX0d1 / 2,
+        "poisson" = svdX0d1 * quantile(Y_mis[, j], 0.9, na.rm = T)
       )
     }
+    
     kappa <- max(Kappa)
     init$kappa = kappa
-  }else{kappa = init$kappa }
+    
+  } else {
+    kappa = init$kappa
+  }
+  
   # kappa = 1
-  X = X/kappa
-  Z = Z/kappa
-  A0 = A0*kappa
-  B0 = B0*kappa
-  C0 = C0*kappa
+  X = X / kappa
+  Z = Z / kappa
+  A0 = A0 * kappa
+  B0 = B0 * kappa
+  C0 = C0 * kappa
   
   C = C0
   B = B0
   A = A0
   V = V0
+  
   # mean((B/kappa - Bt)^2) # 0.00417
-  dif = obj = rep(NA, control$maxit+1)
-  obj[1] = objFun(Y_mis, mu, phi, family, familygroup) + lambda*norm21(A0)# 
-  for (iter in 1:control$maxit) {  
-    # if (control$trace) message(gettextf("iteration %d", iter), domain = NA) 
+  dif = obj = rep(NA, control$maxit + 1)
+  
+  obj[1] = objFun(Y_mis, mu, phi, family, familygroup) +
+    lambda * norm21(A0)
+  
+  for (iter in 1:control$maxit) {
+    # if (control$trace) message(gettextf("iteration %d", iter), domain = NA)
     
-    R = (t(X)%*%(Y-mu)%*%diag(1/phi) + B0)
-    solve.srrr = srrr(Y=R,X=diag(1,p), nrank, A0=A0, V0=V0, modstr = list(lamA=c(lambda),nlam=1),
-                      control=list(epsilon=control$epsilon, maxit=10))
-    A = solve.srrr$A.path[1,,] 
-    V = solve.srrr$V.path[1,,] 
-    B = A%*%t(V)  
+    R = (t(X) %*% (Y - mu) %*% diag(1 / phi) + B0)
+    
+    solve.srrr = srrr(
+      Y = R,
+      X = diag(1, p),
+      nrank,
+      A0 = A0,
+      V0 = V0,
+      modstr = list(lamA = c(lambda), nlam = 1),
+      control = list(epsilon = control$epsilon, maxit = 10)
+    )
+    
+    A = solve.srrr$A.path[1, , ]
+    V = solve.srrr$V.path[1, , ]
+    
+    # Marco's fix 2: enforce matrix structure when rank = 1
+    if (is.null(dim(A))) A <- matrix(A, ncol = 1)
+    if (is.null(dim(V))) V <- matrix(V, ncol = 1)
+    
+    B = A %*% t(V)
+    
     # cat(sum(B[,1]==0))
     # plot(A0, A)
     
     ## update C
-    for(iq in 1:q){
+    for (iq in 1:q) {
       # cat('.')
       # fine to use glm here as Z is low-d
-      fit0 <- glm(Y_mis[,iq] ~ 0+Z, offset=X%*%B[,iq], family=fg[[iq]])
-      C[,iq] = fit0$coef 
+      fit0 <- glm(
+        Y_mis[, iq] ~ 0 + Z,
+        offset = X %*% B[, iq],
+        family = fg[[iq]]
+      )
+      
+      C[, iq] = fit0$coef
     }
     
     ## update working Y, and phi
-    eta <- X%*%B + Z%*%C
-    for(iq in 1:q){
-      fm = fg[[iq]]
-      mu[,iq] = fm$linkinv(eta[,iq])      
-    }
-    Y[id.mis] = mu[id.mis]       
-    phi = ifelse(unlist(lapply(fg, function(a) a$family))=='gaussian', colMeans((Y_mis-mu)^2,na.rm=T), 1)
+    eta <- X %*% B + Z %*% C
     
-    ## conv  
-    # if (sum((eta - etaold)^2) < tol * sum(eta^2))  break
-    # dif[iter] <- sum((B - B0)^2)/(sum(B0^2) + 1e-6) 
-    obj[iter+1] = objFun(Y_mis, mu, phi, family, familygroup) + lambda*norm21(A)
-    dif[iter] = obj[iter+1] / obj[iter] - 1
+    for (iq in 1:q) {
+      fm = fg[[iq]]
+      mu[, iq] = fm$linkinv(eta[, iq])
+    }
+    
+    Y[id.mis] = mu[id.mis]
+    
+    phi = ifelse(
+      unlist(lapply(fg, function(a) a$family)) == "gaussian",
+      colMeans((Y_mis - mu)^2, na.rm = T),
+      1
+    )
+    
+    ## conv
+    # if (sum((eta - etaold)^2) < tol * sum(eta^2)) break
+    # dif[iter] <- sum((B - B0)^2)/(sum(B0^2) + 1e-6)
+    
+    obj[iter + 1] = objFun(Y_mis, mu, phi, family, familygroup) +
+      lambda * norm21(A)
+    
+    dif[iter] = obj[iter + 1] / obj[iter] - 1
+    
     B0 = B
     A0 = A
     V0 = V
     C0 = C
-    # if (dif[iter] < control$epsilon)  break
-    if(dif[iter]>0 & control$trace==T) warning('obj increased')
-    if(abs(dif[iter]) < control$epsilon) break
+    
+    # if (dif[iter] < control$epsilon) break
+    if (dif[iter] > 0 & control$trace == T) {
+      warning("obj increased")
+    }
+    
+    if (abs(dif[iter]) < control$epsilon) {
+      break
+    }
   }
   
   dif = dif[1:iter]
-  obj = obj[1:(iter+1)]  
+  obj = obj[1:(iter + 1)]
   
-  A = A/kappa
-  B = B/kappa
-  C = C/kappa
-  return(list(B=B,A=A,V=V,C=C,phi=phi,mu=mu, dif=dif,obj=obj,Y_imp=Y,Kappa=Kappa,kappa=kappa,iter=iter))
+  A = A / kappa
+  B = B / kappa
+  C = C / kappa
+  
+  return(
+    list(
+      B = B,
+      A = A,
+      V = V,
+      C = C,
+      phi = phi,
+      mu = mu,
+      dif = dif,
+      obj = obj,
+      Y_imp = Y,
+      Kappa = Kappa,
+      kappa = kappa,
+      iter = iter
+    )
+  )
 }
 
 
@@ -320,17 +411,36 @@ msrrr.tuning = function(Y, X, Z, family, familygroup, nrank=2, init=NULL,
     }
     cv.mean <- apply(cv, 1, mean)
     lam.idx <- which.min(cv.mean)
-
+    
     Tunepath = data.frame(cv, cv.mean = cv.mean)
     tunepath.opt = min(cv.mean) 
   }
   
   lam.opt = lamseq[lam.idx] 
+  
   ## refit
   init.i = NULL
-  if(lam.idx>1 & warm==T) init.i = list(A0=Apath[lam.idx,,], V0=Vpath[lam.idx,,], C0=Cpath[lam.idx,,])
-  fit = msrrr.fit(Y, X, Z, family, familygroup, nrank, lam.opt, init.i, control)
-     
+  
+  if (lam.idx > 1 & warm == T) {
+    A0 <- Apath[lam.idx, , ]
+    V0 <- Vpath[lam.idx, , ]
+    
+    # Marco's fix 3: enforce matrix structure when rank = 1
+    if (is.null(dim(A0))) A0 <- matrix(A0, ncol = 1)
+    if (is.null(dim(V0))) V0 <- matrix(V0, ncol = 1)
+    
+    init.i <- list(
+      A0 = A0,
+      V0 = V0,
+      C0 = Cpath[lam.idx, , ]
+    )
+  }
+  
+  fit = msrrr.fit(
+    Y, X, Z, family, familygroup,
+    nrank, lam.opt, init.i, control
+  )
+  
   out <- list(lamseq=lamseq, nrank=nrank, Apath=Apath, Vpath=Vpath, Cpath=Cpath,phipath=phipath,mupath=mupath,  
               method=method, cv.criteria=cv.criteria, foldid=foldid, nfold=nfold, c.BIC=c.BIC, # c('CV', 'BIC', 'BICP', 'AIC', 'GIC'), 
               Tunepath = Tunepath, lam.idx = lam.idx, lam.opt = lam.opt, tunepath.opt = tunepath.opt,
@@ -338,14 +448,14 @@ msrrr.tuning = function(Y, X, Z, family, familygroup, nrank=2, init=NULL,
   return(out)
 }
 
- 
+
 ## final wrapper: select nrank  
 # Z not include a intercept col
 msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL, 
-                  lamseq=NULL, nlam=50, warm=T,   
-                  method='CV', cv.criteria='pMSE', foldid=NULL, nfold=5, c.BIC=2, 
-                  # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
-                  control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T)){
+                 lamseq=NULL, nlam=50, warm=T,   
+                 method='CV', cv.criteria='pMSE', foldid=NULL, nfold=5, c.BIC=2, 
+                 # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
+                 control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T)){
   n = nrow(X)
   Z = cbind(rep(1,n), Z) # 
   # pz = ncol(Z)
@@ -377,7 +487,7 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
   return(out)
 }
 
- 
+
 
 predict.msrrr <- function(object, X.new, Z.new, Y.new, family=NULL, familygroup=NULL, type='response', cv.criteria="pMSE"){
   q = ncol(object$B)
@@ -387,7 +497,7 @@ predict.msrrr <- function(object, X.new, Z.new, Y.new, family=NULL, familygroup=
   fg = family[familygroup]
   eta.new = X.new%*%object$B + cbind(1,Z.new)%*%object$C
   mu.new = matrix(NA, n, q)
-
+  
   for(iq in 1:q){
     fm = fg[[iq]]
     mu.new[,iq] = fm$linkinv(eta.new[,iq])
@@ -398,6 +508,6 @@ predict.msrrr <- function(object, X.new, Z.new, Y.new, family=NULL, familygroup=
   pred.perf = NULL
   if(!is.null(Y.new)) pred.perf <- pmse(Y.new, mu.new, object$fit$phi, family, familygroup)
   if(cv.criteria=='deviance') pred.perf <- 2 * objFun(Y.new, mu.new, object$fit$phi, family, familygroup)
-
+  
   return(list(fit=mu.new, pred.perf=pred.perf))
 }
