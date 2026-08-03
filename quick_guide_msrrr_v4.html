@@ -11,7 +11,7 @@
 
 <meta name="author" content="Augusto Anguita-Ruiz — Original methodology and implementation | María Arteaga Jover — Updates, robustness and workflow maintenance" />
 
-<meta name="date" content="2026-07-31" />
+<meta name="date" content="2026-08-03" />
 
 <title>msRRR v4: Quick-Start Guide</title>
 
@@ -1563,7 +1563,7 @@ interpretation</h3>
 <h4 class="author">Augusto Anguita-Ruiz — Original methodology and
 implementation | María Arteaga Jover — Updates, robustness and workflow
 maintenance</h4>
-<h4 class="date">July 31, 2026</h4>
+<h4 class="date">August 03, 2026</h4>
 
 </div>
 
@@ -1598,7 +1598,7 @@ different starting point.</li>
 <li>Input validation and practical CV diagnostics flag unsuitable
 families, boundary grids, infeasible ranks, rare categories, missing
 outcomes and weak outcome relationships.</li>
-<li>A common <code>1e-8</code> tolerance is used to identify selected
+<li>A common <code>1e-12</code> tolerance is used to identify selected
 coefficients.</li>
 <li>Two separate bootstrap strategies are available, each with its own
 appropriate outputs and interpretation.</li>
@@ -1679,7 +1679,7 @@ development sample and stored for prediction.</p>
 <span id="cb2-6"><a href="#cb2-6" tabindex="-1"></a>  <span class="at">familygroup =</span> <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">1</span>, <span class="dv">2</span>),</span>
 <span id="cb2-7"><a href="#cb2-7" tabindex="-1"></a>  <span class="at">nrankseq =</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span>,</span>
 <span id="cb2-8"><a href="#cb2-8" tabindex="-1"></a>  <span class="at">lamseq =</span> <span class="cn">NULL</span>,</span>
-<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>  <span class="at">nlam =</span> <span class="dv">100</span>,</span>
+<span id="cb2-9"><a href="#cb2-9" tabindex="-1"></a>  <span class="at">nlam =</span> <span class="dv">50</span>,</span>
 <span id="cb2-10"><a href="#cb2-10" tabindex="-1"></a>  <span class="at">foldid =</span> foldid,</span>
 <span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a>  <span class="at">nfold =</span> <span class="dv">5</span>,</span>
 <span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">&quot;CV&quot;</span>,</span>
@@ -1687,8 +1687,10 @@ development sample and stored for prediction.</p>
 <span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>  <span class="at">warm =</span> <span class="cn">TRUE</span>,</span>
 <span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a>  <span class="at">diagnostics =</span> <span class="cn">TRUE</span>,</span>
 <span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a>  <span class="at">print_diagnostics_at_end =</span> <span class="cn">TRUE</span>,</span>
-<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>  <span class="at">diagnostics_file =</span> <span class="st">&quot;results/MSRRR_CV_DIAGNOSTICS.csv&quot;</span></span>
-<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a>)</span></code></pre></div>
+<span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>  <span class="at">diagnostics_file =</span> <span class="fu">file.path</span>(</span>
+<span id="cb2-18"><a href="#cb2-18" tabindex="-1"></a>    results_dir, <span class="st">&quot;MSRRR_CV_DIAGNOSTICS.csv&quot;</span></span>
+<span id="cb2-19"><a href="#cb2-19" tabindex="-1"></a>  )</span>
+<span id="cb2-20"><a href="#cb2-20" tabindex="-1"></a>)</span></code></pre></div>
 <p><code>family</code> lists the outcome distributions used in the
 model. <code>familygroup</code> assigns each column of Y to one entry of
 that list. In the example,
@@ -1751,11 +1753,18 @@ to estimating any of these parameters.</p>
 <span id="cb3-6"><a href="#cb3-6" tabindex="-1"></a>  <span class="at">cv.criteria =</span> <span class="st">&quot;pMSE&quot;</span></span>
 <span id="cb3-7"><a href="#cb3-7" tabindex="-1"></a>)</span></code></pre></div>
 </div>
-<div id="core-settings" class="section level2">
-<h2>7. Core settings</h2>
-<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>n_lambda <span class="ot">&lt;-</span> <span class="dv">100</span></span>
+<div id="tutorial-and-definitive-analysis-settings" class="section level2">
+<h2>7. Tutorial and definitive-analysis settings</h2>
+<p>The complete tutorial demonstrates both post-selection approaches and
+both penalised and unpenalised LOCO analyses. To keep that demonstration
+computationally manageable, it uses:</p>
+<div class="sourceCode" id="cb4"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" tabindex="-1"></a>n_lambda <span class="ot">&lt;-</span> <span class="dv">25</span></span>
 <span id="cb4-2"><a href="#cb4-2" tabindex="-1"></a>rank_sequence <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span></span>
-<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>n_boot_global <span class="ot">&lt;-</span> <span class="dv">500</span></span></code></pre></div>
+<span id="cb4-3"><a href="#cb4-3" tabindex="-1"></a>n_boot_global <span class="ot">&lt;-</span> <span class="dv">100</span></span></code></pre></div>
+<p>For a definitive analysis, the recommended starting settings are:</p>
+<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>n_lambda <span class="ot">&lt;-</span> <span class="dv">50</span></span>
+<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>rank_sequence <span class="ot">&lt;-</span> <span class="dv">1</span><span class="sc">:</span><span class="dv">4</span></span>
+<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>n_boot_global <span class="ot">&lt;-</span> <span class="dv">500</span></span></code></pre></div>
 <ul>
 <li><code>n_lambda</code>: Number of values evaluated along the
 penalisation path. More values provide finer resolution but increase
@@ -1765,11 +1774,22 @@ Include rank 1 unless there is a justified reason not to test it.</li>
 <li><code>n_boot_global</code>: Number of bootstrap resamples. More
 resamples provide more stable summaries but take longer.</li>
 </ul>
+<p>The definitive settings are recommendations rather than universal
+constants. Approximately 50 lambda values usually provide a reasonable
+balance between resolution and computation. Consider increasing the grid
+to 100 values when the CV curve changes sharply near its minimum or
+finer discrimination between neighbouring lambda values is required. The
+appropriate rank range and lambda grid should be assessed from the CV
+diagnostics, and the number of bootstrap resamples should reflect the
+required precision and available computational resources. Reduced
+tutorial settings are useful for checking the complete workflow, but
+should not automatically be adopted for a definitive analysis.</p>
 </div>
 <div id="review-the-diagnostic-audit" class="section level2">
 <h2>8. Review the diagnostic audit</h2>
-<p>Do not ignore a boundary warning. It indicates that the tested grid
-may not contain the preferred model.</p>
+<p>A boundary warning indicates that the tested grid deserves review; it
+does not by itself show that the selected model is invalid or that the
+grid must always be extended.</p>
 <table>
 <colgroup>
 <col width="33%" />
@@ -1806,13 +1826,15 @@ rows than that rank</td>
 <tr class="even">
 <td>Selected lambda is an endpoint</td>
 <td>The penalty path may be too narrow</td>
-<td>Use the reported endpoint and suggested next bound to extend
-<code>lamseq</code></td>
+<td>Inspect the complete CV curve and, when the optimum may lie beyond
+the tested range, extend <code>lamseq</code> and reassess</td>
 </tr>
 <tr class="odd">
 <td>Largest lambda still selects exposures</td>
 <td>The path does not reach an exposure-free model</td>
-<td>Try the larger bound reported in the warning and reassess</td>
+<td>Consider a larger bound, but assess whether stronger penalisation is
+scientifically useful and whether validation loss deteriorates
+materially</td>
 </tr>
 <tr class="even">
 <td>Rare 0/1 predictor</td>
@@ -1835,17 +1857,26 @@ modelling</td>
 </table>
 <p>Messages and warnings are stored in <code>fit$diagnostics</code> and
 may also be written to a CSV using <code>diagnostics_file</code>.</p>
+<p>In some applications, extending the lambda sequence may add little
+useful information. For example, the validation loss can already be
+approximately flat towards weaker penalisation, while stronger
+penalisation produces a clear deterioration. In that situation, it may
+be reasonable not to continue towards either <code>lambda = 0</code> or
+a completely exposure-free model. Conversely, if the CV curve is still
+improving at an endpoint, extending the grid is important. The decision
+should therefore be based on the observed curve and model behaviour, not
+solely on whether both theoretical endpoints were fitted.</p>
 </div>
 <div id="whole-sample-refit" class="section level2">
 <h2>9. Whole-sample refit</h2>
 <p>After selecting rank and lambda in the development sample, refit the
 penalised model using all available participants:</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" tabindex="-1"></a>fit_whole <span class="ot">&lt;-</span> <span class="fu">refit_msrrr</span>(</span>
-<span id="cb5-2"><a href="#cb5-2" tabindex="-1"></a>  <span class="at">object =</span> fit,</span>
-<span id="cb5-3"><a href="#cb5-3" tabindex="-1"></a>  <span class="at">Y =</span> Y_whole,</span>
-<span id="cb5-4"><a href="#cb5-4" tabindex="-1"></a>  <span class="at">X =</span> X_whole,</span>
-<span id="cb5-5"><a href="#cb5-5" tabindex="-1"></a>  <span class="at">Z =</span> Z_whole</span>
-<span id="cb5-6"><a href="#cb5-6" tabindex="-1"></a>)</span></code></pre></div>
+<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>fit_whole <span class="ot">&lt;-</span> <span class="fu">refit_msrrr</span>(</span>
+<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>  <span class="at">object =</span> fit,</span>
+<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>  <span class="at">Y =</span> Y_whole,</span>
+<span id="cb6-4"><a href="#cb6-4" tabindex="-1"></a>  <span class="at">X =</span> X_whole,</span>
+<span id="cb6-5"><a href="#cb6-5" tabindex="-1"></a>  <span class="at">Z =</span> Z_whole</span>
+<span id="cb6-6"><a href="#cb6-6" tabindex="-1"></a>)</span></code></pre></div>
 <p><code>refit_msrrr()</code> reuses the selected rank, lambda and
 stored initialisation. It learns new preprocessing parameters from the
 whole sample.</p>
@@ -1909,6 +1940,9 @@ interpretation and are not reported.</p>
 fixed. The model is refitted with <code>lambda = 0</code>, and every
 bootstrap fits that same subset and rank using
 <code>init = NULL</code>.</p>
+<p>If the selected subset contains fewer exposures than the selected
+rank, the unpenalised refit reduces the rank to the largest
+mathematically feasible value.</p>
 <p>Bootstrap estimates provide a standard error used for an approximate
 two-sided p-value and 95% confidence interval for each exposure-outcome
 coefficient. These summaries are conditional on the preceding selection
@@ -1919,28 +1953,42 @@ step and should be reported as post-selection inference.</p>
 <h2>11. Optional LOCO sensitivity analysis</h2>
 <p>Leave-one-cohort-out (LOCO) analysis removes one cohort at a time to
 examine whether results depend strongly on a particular cohort.</p>
-<div class="sourceCode" id="cb6"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" tabindex="-1"></a>run_penalized_loco <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
-<span id="cb6-2"><a href="#cb6-2" tabindex="-1"></a>run_penalized_loco_bootstrap <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
-<span id="cb6-3"><a href="#cb6-3" tabindex="-1"></a>run_unpenalized_loco <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span></code></pre></div>
+<div class="sourceCode" id="cb7"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" tabindex="-1"></a>run_penalized_loco <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
+<span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>run_penalized_loco_bootstrap <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
+<span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a>run_unpenalized_loco <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
+<span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>run_unpenalized_loco_bootstrap <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span></code></pre></div>
 <p>For every exclusion, X/Z standardisation and Gaussian-outcome scaling
 are recalculated using retained participants only.</p>
 <ul>
 <li>Penalised LOCO permits coefficient selection to change after each
 exclusion.</li>
+<li>Its pre-bootstrap summary counts the cohort exclusions in which each
+coefficient is selected. When bootstrap is enabled, its post-bootstrap
+summary counts exclusions in which the coefficient passes both the
+selection probability and sign-consistency criteria.</li>
 <li>Unpenalised LOCO keeps the whole-sample selected exposure subset
 fixed and evaluates that same candidate set after each exclusion.</li>
+<li>Its pre-bootstrap summary records the fitted coefficient signs,
+whereas its post-bootstrap summary counts cohort exclusions in which the
+approximate coefficient p-value is below 0.05. The pre-bootstrap outputs
+remain available when the unpenalised LOCO bootstrap is disabled.</li>
 <li>Bootstrap resamples are generated independently within every
 excluded-cohort dataset.</li>
 </ul>
-<p>Set the flags to <code>FALSE</code> when LOCO is not required.</p>
+<p>The analysis and bootstrap flags are independent. Set either
+bootstrap flag to <code>FALSE</code> to retain its ordinary LOCO
+analysis without running the corresponding LOCO bootstrap.</p>
 </div>
 <div id="output-directory-behaviour" class="section level2">
 <h2>12. Output-directory behaviour</h2>
-<p>The workflow creates <code>results</code> when it does not exist. It
-does not delete the directory. Files with identical names are
-overwritten, while unrelated files from earlier runs remain. Use a clean
-or renamed output directory for a final analysis to avoid mixing current
-and historical results.</p>
+<p>Define the output directory once near the beginning of the
+script:</p>
+<div class="sourceCode" id="cb8"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" tabindex="-1"></a>results_dir <span class="ot">&lt;-</span> <span class="st">&quot;results&quot;</span></span></code></pre></div>
+<p>All output paths are then constructed from <code>results_dir</code>.
+The workflow creates that directory when it does not exist, but does not
+delete it. Files with identical names are overwritten, while unrelated
+files from earlier runs remain. Use a clean or renamed output directory
+for a final analysis to avoid mixing current and historical results.</p>
 </div>
 <div id="final-checklist" class="section level2">
 <h2>13. Final checklist</h2>
@@ -1985,8 +2033,10 @@ reporting.</label></li>
 <h2>14. Full workflow</h2>
 <p>For the complete executable analysis, figures and detailed
 explanation, use:</p>
-<pre class="text"><code>main_script_msrrr_exposome_v_31_07_2026.R
-rmarkdown_main_script_msrrr_exposome_v_31_07_2026.Rmd</code></pre>
+<pre class="text"><code>main_script_msrrr_exposome_v_03_08_2026.R
+rmarkdown_main_script_msrrr_exposome_v_02_08_2026.html</code></pre>
+<p>The repository distributes the rendered HTML tutorial for direct
+viewing; the R script contains the executable full workflow.</p>
 </div>
 
 
