@@ -676,6 +676,21 @@ family_mapping   <- c(1, 2, 1, 1, 1, 2)
 #   reuses that same sequence in every fold. nlam is ignored when lamseq is
 #   supplied. With warm = TRUE, lambdas are evaluated from largest to smallest.
 #
+# Warm-start guidance:
+# - warm = TRUE reuses the solution from the preceding lambda as the
+#   initialisation for the next lambda within the same rank and CV fold. It
+#   does not transfer information between training and validation folds and
+#   therefore does not introduce data leakage. It greatly reduces computation
+#   time and is recommended for the main CV analysis.
+# - Because msRRR optimisation is non-convex, solutions can depend on
+#   initialisation. warm = FALSE fits each lambda from an independent
+#   initialisation and can be used as a sensitivity analysis when
+#   computationally feasible. It may be substantially slower and is not
+#   inherently more statistically valid or more accurate.
+# - A practical sensitivity check is to compare warm = TRUE and warm = FALSE
+#   for one representative scenario and a reduced lambda grid before attempting
+#   the complete workflow.
+#
 # CV and diagnostics:
 # - foldid fixes the fold assignment; nfold must match its number of levels.
 # - cv.criteria selects "deviance" or "pMSE".
@@ -960,6 +975,16 @@ save_grobs_pdf(
   file.path(results_dir, "Exposome_Signatures_training_CV.pdf"),
   width = 18, height = 30
 )
+cv_heatmap_models <- list(PREGNANCY = fit_preg, CHILDHOOD = fit_child, COMBINED = fit_comb)
+for (i in seq_along(cv_heatmap_grobs)) {
+  scenario_name <- names(cv_heatmap_models)[i]
+  save_grob_svg(
+    cv_heatmap_grobs[[i]],
+    file.path(results_dir, paste0("Exposome_Signatures_training_CV_", scenario_name, ".svg")),
+    width = 18,
+    height = heatmap_canvas_height(model_heatmap_n_rows(cv_heatmap_models[[i]]))
+  )
+}
 graphics.off()
 message(">>> Block 8 Complete. Heatmaps updated with non-linear scale.")
 
@@ -1068,6 +1093,20 @@ save_grobs_pdf(
   file.path(results_dir, "Exposome_Signatures_WHOLE_SAMPLE_final_prebootstrap.pdf"),
   width = 18, height = 30
 )
+whole_heatmap_models <- list(
+  PREGNANCY = fit_preg_whole,
+  CHILDHOOD = fit_child_whole,
+  COMBINED = fit_comb_whole
+)
+for (i in seq_along(whole_heatmap_grobs)) {
+  scenario_name <- names(whole_heatmap_models)[i]
+  save_grob_svg(
+    whole_heatmap_grobs[[i]],
+    file.path(results_dir, paste0("Exposome_Signatures_WHOLE_SAMPLE_", scenario_name, ".svg")),
+    width = 18,
+    height = heatmap_canvas_height(model_heatmap_n_rows(whole_heatmap_models[[i]]))
+  )
+}
 graphics.off()
 if (!is.null(dev.list())) {dev.off()}
 
@@ -1534,6 +1573,22 @@ for (scenario in heatmap_scenarios) {
 save_grobs_pdf(
   penalised_pre_post_grobs, output_pdf, width = 20, height = 26
 )
+if (!split_heatmaps_by_domain) {
+  for (i in seq_along(heatmap_scenarios)) {
+    scenario <- heatmap_scenarios[[i]]
+    save_grob_svg(
+      penalised_pre_post_grobs[[i]],
+      file.path(
+        results_dir,
+        paste0("PENALISED_PRE_vs_POST_BOOTSTRAP_", toupper(scenario$name), ".svg")
+      ),
+      width = 20,
+      height = heatmap_canvas_height(
+        model_heatmap_n_rows(scenario$fit), cellheight = heatmap_cellheight
+      )
+    )
+  }
+}
 graphics.off()
 message(">>> Comparative heatmaps exported to: ", output_pdf)
 
@@ -1873,14 +1928,19 @@ if (run_penalized_loco) {
     )
   }
   save_grobs_pdf(loco_summary_grobs, loco_pdf, 14, 30)
+  loco_summary_svg_heights <- numeric(0)
   for (scenario_name in names(loco_summaries)) {
+    svg_height <- heatmap_canvas_height(
+      loco_summary_n_rows(loco_summaries[[scenario_name]]), cellheight = 13
+    )
+    loco_summary_svg_heights[scenario_name] <- svg_height
     save_grob_svg(
       loco_summary_grobs[[scenario_name]],
       file.path(
         loco_output_dir,
         paste0("PENALISED_LOCO_SELECTION_", toupper(scenario_name), ".svg")
       ),
-      width = 14, height = 30
+      width = 14, height = svg_height
     )
   }
   
@@ -1903,7 +1963,13 @@ if (run_penalized_loco) {
       )
     }
     save_grobs_pdf(stable_loco_grobs, loco_bootstrap_pdf, 14, 30)
+    stable_loco_svg_heights <- numeric(0)
     for (scenario_name in names(loco_bootstrap_stable_summaries)) {
+      svg_height <- heatmap_canvas_height(
+        loco_summary_n_rows(loco_bootstrap_stable_summaries[[scenario_name]]),
+        cellheight = 13
+      )
+      stable_loco_svg_heights[scenario_name] <- svg_height
       save_grob_svg(
         stable_loco_grobs[[scenario_name]],
         file.path(
@@ -1913,12 +1979,13 @@ if (run_penalized_loco) {
             toupper(scenario_name), ".svg"
           )
         ),
-        width = 14, height = 30
+        width = 14, height = svg_height
       )
     }
     save_grob_svg(
       gridExtra::arrangeGrob(grobs = stable_loco_grobs, ncol = 1),
-      sub("\\.pdf$", ".svg", loco_bootstrap_pdf), 14, 90
+      sub("\\.pdf$", ".svg", loco_bootstrap_pdf), 14,
+      sum(stable_loco_svg_heights)
     )
 
     # Direct pre- versus post-bootstrap LOCO comparison.
@@ -1958,6 +2025,9 @@ if (run_penalized_loco) {
         )
       )
       loco_pre_post_grobs[[scenario_name]] <- comparison_grob
+      comparison_svg_height <- heatmap_canvas_height(
+        length(common_rows), cellheight = 13
+      )
       svg_name <- file.path(
         loco_output_dir,
         paste0(
@@ -1965,7 +2035,7 @@ if (run_penalized_loco) {
           toupper(scenario_name), ".svg"
         )
       )
-      save_grob_svg(comparison_grob, svg_name, 22, 30)
+      save_grob_svg(comparison_grob, svg_name, 22, comparison_svg_height)
     }
     save_grobs_pdf(loco_pre_post_grobs, loco_pre_post_pdf, 22, 30)
   }
@@ -2136,6 +2206,7 @@ graphics.off()
 message(">>> Unpenalised pre/post heatmaps exported to: ", unpenalized_pdf)
 
 # SVG is a single-page format: export one editable file per scenario.
+unpenalized_svg_heights <- numeric(length(unpenalized_heatmap_scenarios))
 for (scenario_index in seq_along(unpenalized_heatmap_scenarios)) {
   scenario <- unpenalized_heatmap_scenarios[[scenario_index]]
   svg_file <- file.path(
@@ -2145,12 +2216,16 @@ for (scenario_index in seq_along(unpenalized_heatmap_scenarios)) {
   scenario_grob <- plot_unpenalized_pre_post(
     scenario$fit, scenario$results, scenario$name, draw = FALSE
   )
-  save_grob_svg(scenario_grob, svg_file, width = 20, height = 26)
+  scenario_svg_height <- heatmap_canvas_height(
+    ncol(scenario$fit$X_selected), cellheight = heatmap_cellheight
+  )
+  save_grob_svg(scenario_grob, svg_file, width = 20, height = scenario_svg_height)
+  unpenalized_svg_heights[scenario_index] <- scenario_svg_height
 }
 unpenalized_combined_svg <- sub("\\.pdf$", ".svg", unpenalized_pdf)
 save_grob_svg(
   gridExtra::arrangeGrob(grobs = unpenalized_pre_post_grobs, ncol = 1),
-  unpenalized_combined_svg, width = 20, height = 72
+  unpenalized_combined_svg, width = 20, height = sum(unpenalized_svg_heights)
 )
 
 
@@ -2220,6 +2295,9 @@ if (run_unpenalized_loco) {
     vector("list", length(cohort_levels)), cohort_levels
   )
   unpenalized_loco_results <- setNames(
+    vector("list", length(cohort_levels)), cohort_levels
+  )
+  unpenalized_loco_run_information <- setNames(
     vector("list", length(cohort_levels)), cohort_levels
   )
   
@@ -2292,6 +2370,16 @@ if (run_unpenalized_loco) {
       )
       unpenalized_loco_fits[[omitted_cohort]][[scenario_name]] <-
         unpenalized_object_loco
+      saveRDS(
+        unpenalized_object_loco,
+        file.path(
+          unpenalized_loco_dir,
+          paste0(
+            "UNPENALISED_LOCO_", scenario_name,
+            "_without_cohort_", omitted_cohort, ".rds"
+          )
+        )
+      )
       
       if (run_unpenalized_loco_bootstrap) {
         inference_loco <- run_unpenalized_bootstrap(
@@ -2322,7 +2410,23 @@ if (run_unpenalized_loco) {
         )
       }
     }
+    unpenalized_loco_run_information[[omitted_cohort]] <- data.frame(
+      omitted_cohort = omitted_cohort,
+      n_omitted = sum(!keep_subject),
+      n_retained = sum(keep_subject),
+      n_covariates_retained = ncol(Z_loco),
+      stringsAsFactors = FALSE
+    )
   }
+
+  unpenalized_loco_run_information <- do.call(
+    rbind, unpenalized_loco_run_information
+  )
+  write.csv2(
+    unpenalized_loco_run_information,
+    file.path(unpenalized_loco_dir, "UNPENALISED_LOCO_RUN_INFORMATION.csv"),
+    row.names = FALSE
+  )
   
   unpenalized_loco_summaries <- list()
   unpenalized_loco_pre_summaries <- list()
@@ -2374,6 +2478,21 @@ if (run_unpenalized_loco) {
       n_positive = n_fitted_positive,
       n_negative = n_fitted_negative
     )
+    pre_summary_long <- expand.grid(
+      exposure = selected_names, outcome = outcome_names,
+      KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE
+    )
+    pre_summary_long$n_selected_loco <- as.vector(n_fitted)
+    pre_summary_long$n_positive_selected <- as.vector(n_fitted_positive)
+    pre_summary_long$n_negative_selected <- as.vector(n_fitted_negative)
+    write.csv2(
+      pre_summary_long,
+      file.path(
+        unpenalized_loco_dir,
+        paste0("UNPENALISED_LOCO_PRE_SUMMARY_", toupper(scenario_name), ".csv")
+      ),
+      row.names = FALSE
+    )
     if (run_unpenalized_loco_bootstrap) {
       summary_long <- expand.grid(
         exposure = selected_names,
@@ -2403,6 +2522,19 @@ if (run_unpenalized_loco) {
       )
     }
   }
+  saveRDS(
+    unpenalized_loco_pre_summaries,
+    file.path(unpenalized_loco_dir, "UNPENALISED_LOCO_ALL_PRE_SUMMARIES.rds")
+  )
+  if (run_unpenalized_loco_bootstrap) {
+    saveRDS(
+      unpenalized_loco_summaries,
+      file.path(
+        unpenalized_loco_dir,
+        "UNPENALISED_LOCO_ALL_SIGNIFICANCE_SUMMARIES.rds"
+      )
+    )
+  }
 
   # Always export the unpenalised LOCO fits before bootstrap. This remains
   # available when run_unpenalized_loco_bootstrap = FALSE.
@@ -2424,7 +2556,13 @@ if (run_unpenalized_loco) {
   save_grobs_pdf(
     unpenalized_loco_pre_grobs, unpenalized_loco_pre_pdf, 14, 30
   )
+  unpenalized_loco_pre_svg_heights <- numeric(0)
   for (scenario_name in names(unpenalized_loco_pre_summaries)) {
+    svg_height <- heatmap_canvas_height(
+      loco_summary_n_rows(unpenalized_loco_pre_summaries[[scenario_name]]),
+      cellheight = 13
+    )
+    unpenalized_loco_pre_svg_heights[scenario_name] <- svg_height
     save_grob_svg(
       unpenalized_loco_pre_grobs[[scenario_name]],
       file.path(
@@ -2433,7 +2571,7 @@ if (run_unpenalized_loco) {
           "UNPENALISED_LOCO_SELECTION_", toupper(scenario_name), ".svg"
         )
       ),
-      width = 14, height = 30
+      width = 14, height = svg_height
     )
   }
   
@@ -2454,7 +2592,13 @@ if (run_unpenalized_loco) {
     )
   }
   save_grobs_pdf(unpenalized_loco_grobs, unpenalized_loco_pdf, 14, 30)
+  unpenalized_loco_svg_heights <- numeric(0)
   for (scenario_name in names(unpenalized_loco_summaries)) {
+    svg_height <- heatmap_canvas_height(
+      loco_summary_n_rows(unpenalized_loco_summaries[[scenario_name]]),
+      cellheight = 13
+    )
+    unpenalized_loco_svg_heights[scenario_name] <- svg_height
     save_grob_svg(
       unpenalized_loco_grobs[[scenario_name]],
       file.path(
@@ -2463,12 +2607,13 @@ if (run_unpenalized_loco) {
           "UNPENALISED_LOCO_SIGNIFICANCE_", toupper(scenario_name), ".svg"
         )
       ),
-      width = 14, height = 30
+      width = 14, height = svg_height
     )
   }
   save_grob_svg(
     gridExtra::arrangeGrob(grobs = unpenalized_loco_grobs, ncol = 1),
-    sub("\\.pdf$", ".svg", unpenalized_loco_pdf), 14, 90
+    sub("\\.pdf$", ".svg", unpenalized_loco_pdf), 14,
+    sum(unpenalized_loco_svg_heights)
   )
 
   unpenalized_loco_pre_post_pdf <- file.path(
@@ -2509,6 +2654,9 @@ if (run_unpenalized_loco) {
       )
     )
     unpenalized_loco_pre_post_grobs[[scenario_name]] <- comparison_grob
+    comparison_svg_height <- heatmap_canvas_height(
+      length(common_rows), cellheight = 13
+    )
     svg_name <- file.path(
       unpenalized_loco_dir,
       paste0(
@@ -2516,7 +2664,7 @@ if (run_unpenalized_loco) {
         toupper(scenario_name), ".svg"
       )
     )
-    save_grob_svg(comparison_grob, svg_name, 22, 30)
+    save_grob_svg(comparison_grob, svg_name, 22, comparison_svg_height)
   }
   save_grobs_pdf(
     unpenalized_loco_pre_post_grobs,
@@ -2530,6 +2678,7 @@ if (run_unpenalized_loco) {
     unpenalized_loco_results,
     unpenalized_loco_summaries,
     unpenalized_loco_pre_summaries,
+    unpenalized_loco_run_information,
     file = file.path(
       unpenalized_loco_dir, "UNPENALISED_LOCO_RESULTS.RData"
     )
