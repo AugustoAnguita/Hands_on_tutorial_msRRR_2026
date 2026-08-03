@@ -149,7 +149,7 @@ if (!dir.exists(results_dir)) {
 # Around 50 values usually provide sufficient resolution for model selection.
 # Increase this value if the CV curve changes sharply near its minimum or if
 # finer discrimination between neighbouring lambda values is required. This
-# tutorial uses 25 because to substantially reduce computation time.
+# tutorial uses 25 to substantially reduce computation time.
 n_lambda <- 25
 
 # Candidate reduced ranks evaluated by cross-validation.
@@ -163,6 +163,25 @@ rank_sequence <- 1:4
 # tutorial uses 100 because it demonstrates both bootstrap approaches and
 # optional LOCO analyses, which substantially increases computation time.
 n_boot_global <- 100
+
+# COMPUTATIONAL-COST WARNING
+# --------------------------
+# A complete run is intentionally demanding. With the tutorial settings above,
+# the three CV analyses already require roughly 1,800 candidate model fits
+# (3 scenarios x 4 ranks x 25 lambdas x 5 folds, plus final/path refits).
+# The ordinary penalised and unpenalised bootstraps add 600 fits in total.
+# If both LOCO analyses and both LOCO bootstraps are enabled for six cohorts,
+# they add approximately 3,600 bootstrap fits, plus the ordinary LOCO fits.
+# Thus, the full tutorial can involve around 6,000 optimisation fits and may
+# take several hours even on a powerful machine. Runtime depends mainly on CPU
+# speed, parallel-worker availability, convergence and data dimensions; large
+# RAM alone does not make the individual optimisations fast.
+#
+# For a quick workflow check, consider temporarily disabling the optional LOCO
+# blocks and/or their bootstrap switches. Do not interpret reduced quick-check
+# settings as definitive results. The workflow saves preprocessing, fitted
+# objects and summaries at several stages; review the corresponding load/save
+# points before restarting an interrupted run from a later block.
 
 # Close all open graphical devices from previous/interrupted runs
 graphics.off()
@@ -1154,6 +1173,10 @@ message(">>> Whole Sample results table saved to: ", file.path(results_dir, "mod
 # ==============================================================================
 # BLOCK 10: APPROACH A - PENALISED BOOTSTRAP
 # ==============================================================================
+# COMPUTATIONAL COST: 3 scenarios x n_boot_global independent fits
+# (300 fits when n_boot_global = 100; 1,500 fits when it equals 500).
+# This block can take substantial time because every bootstrap fit starts from
+# an independent initialisation rather than following a warm-start path.
 
 # APPROACH A: PENALISED BOOTSTRAP STABILITY AFTER MODEL SELECTION
 # ------------------------------------------------------------------------------
@@ -1615,9 +1638,12 @@ message(">>> Comparative heatmaps exported to: ", output_pdf)
 #      frequency/sign across the six cohort exclusions; and
 #   8) exports the LOCO summary plots and pre- versus post-bootstrap comparisons
 #
-# REMINDER: change run_penalized_loco to TRUE to execute this entire block.
+# Set run_penalized_loco = FALSE to skip this entire optional block. Set
+# run_penalized_loco_bootstrap = FALSE to retain ordinary penalised LOCO fits
+# and summaries without running the much more expensive LOCO bootstrap.
 # Computational cost: 6 cohorts x 3 scenarios x n_boot_global bootstrap fits
-# (9,000 fits when n_boot_global = 500).
+# (1,800 fits when n_boot_global = 100; 9,000 when it equals 500).
+# This is normally one of the two longest blocks in the complete workflow.
 # ==============================================================================
 run_penalized_loco <- TRUE
 run_penalized_loco_bootstrap <- TRUE
@@ -2104,6 +2130,10 @@ save(
 # ==============================================================================
 # BLOCK 14: APPROACH B - CONDITIONAL UNPENALISED BOOTSTRAP
 # ==============================================================================
+# COMPUTATIONAL COST: 3 scenarios x n_boot_global independent fits
+# (300 fits when n_boot_global = 100; 1,500 fits when it equals 500).
+# These unpenalised refits can still be slow because each resample recalculates
+# its initialisation and optimises the fixed post-selection model.
 # The exposure subsets and ranks come from the shared penalised whole-sample
 # models in Block 9. Each bootstrap fit keeps that candidate set fixed, uses
 # lambda = 0 and starts independently with init = NULL.
@@ -2240,7 +2270,12 @@ save_grob_svg(
 # sourced from functions/msrrr_tutorial_workflow_functions.R.
 # It also exports its own LOCO significance/sign summaries and pre- versus
 # post-bootstrap comparison plots.
-# Computational cost: another 6 cohorts x 3 scenarios x n_boot_global fits.
+# Set run_unpenalized_loco = FALSE to skip this entire optional block. Set
+# run_unpenalized_loco_bootstrap = FALSE to retain its ordinary pre-bootstrap
+# LOCO fits and outputs without running the expensive bootstrap component.
+# Computational cost: another 6 cohorts x 3 scenarios x n_boot_global fits
+# (1,800 fits when n_boot_global = 100; 9,000 when it equals 500).
+# This is normally the other longest block in the complete workflow.
 # ==============================================================================
 run_unpenalized_loco <- TRUE
 run_unpenalized_loco_bootstrap <- TRUE
