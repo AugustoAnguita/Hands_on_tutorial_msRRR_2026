@@ -89,13 +89,13 @@ applied analysis should pre-specify its primary approach.
 
 The current tutorial uses:
 
-- 25 lambda values;
-- candidate ranks 1 to 4;
-- 100 bootstrap resamples;
-- penalised stability thresholds of 0.90 for selection probability and 0.80
-  for sign consistency in Approach A; and
-- an approximate two-sided p-value threshold of 0.05 for highlighting results
-  from the conditional unpenalised refit in Approach B.
+- 25 lambda values
+- Candidate ranks 1 to 4
+- 100 bootstrap resamples
+- Penalised stability thresholds of 0.90 for selection probability and 0.80
+  for sign consistency in Approach A
+- An approximate two-sided p-value threshold of 0.05 for highlighting results
+  from the conditional unpenalised refit in Approach B
 
 These settings keep the complete demonstration computationally manageable. At
 least 500 bootstrap resamples are recommended for a definitive analysis.
