@@ -1,0 +1,6 @@
+"condition";"text"
+"message";"No lambda sequence supplied. A common sequence is calculated from the complete development sample after preprocessing; it is then reused unchanged in every CV fold.
+"
+"warning";"The selected rank (4) is the largest value tested. Consider extending nrankseq upward and refitting with the same CV folds. The maximum feasible rank is 6."
+"warning";"The selected lambda is the smallest value tested (1.2151e-04). A less penalised model may perform better. Consider extending lamseq towards zero; for example, test a lower bound of 1.2151e-05 while retaining the current range."
+"warning";"The largest lambda tested (1.2151e+01) still selects 5 exposure(s). The lambda path does not reach an exposure-free model. Consider extending its upper end; for example, test at least 1.2151e+02 and reassess."
