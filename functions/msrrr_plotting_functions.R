@@ -420,8 +420,8 @@ plot_penalized_loco_summary <- function(
     )
   })
   # Do not let arrangeGrob distribute the legend entries over the full heatmap
-  # height. Give every entry a compact physical height, anchor the complete
-  # legend at the top and leave any remaining panel height blank underneath.
+  # height. Give every entry a compact physical height and centre the complete
+  # legend vertically beside the heatmap.
   legend_row_heights <- ifelse(
     legend_labels == "", 0.10,
     ifelse(headings, 0.24, 0.22)
@@ -431,8 +431,9 @@ plot_penalized_loco_summary <- function(
     heights = grid::unit(legend_row_heights, "in")
   )
   legend_grob <- gridExtra::arrangeGrob(
-    legend_content, grid::nullGrob(), ncol = 1,
+    grid::nullGrob(), legend_content, grid::nullGrob(), ncol = 1,
     heights = grid::unit.c(
+      grid::unit(1, "null"),
       grid::unit(sum(legend_row_heights), "in"),
       grid::unit(1, "null")
     )
