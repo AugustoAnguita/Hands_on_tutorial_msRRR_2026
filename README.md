@@ -4,8 +4,13 @@
 mixed-response sparse reduced-rank regression, bootstrap assessment, and
 optional leave-one-cohort-out sensitivity analyses.**
 
-By Dr Augusto Anguita-Ruiz, Junior Research Leader at the Barcelona Institute
-for Global Health (ISGlobal).
+Workflow and tutorial by:
+
+- Dr Augusto Anguita-Ruiz, Junior Research Leader at the Barcelona Institute
+  for Global Health (ISGlobal)
+- María Arteaga Jover, Bioinformatics Technician at ISGlobal and PhD Student
+  in Information and Communication Technologies (Bioinformatics) at the
+  University of Granada
 
 [YouTube tutorial companion](https://youtu.be/YarXHQBGgLA?si=F4EX3K43nnFaqjHz&t=1)
 
