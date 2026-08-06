@@ -11,7 +11,7 @@
 
 <meta name="author" content="Augusto Anguita-Ruiz — Original methodology and implementation | María Arteaga Jover — Updates, robustness and workflow maintenance" />
 
-<meta name="date" content="2026-08-03" />
+<meta name="date" content="2026-08-06" />
 
 <title>msRRR v4: Quick-Start Guide</title>
 
@@ -1563,7 +1563,7 @@ interpretation</h3>
 <h4 class="author">Augusto Anguita-Ruiz — Original methodology and
 implementation | María Arteaga Jover — Updates, robustness and workflow
 maintenance</h4>
-<h4 class="date">August 03, 2026</h4>
+<h4 class="date">August 06, 2026</h4>
 
 </div>
 
@@ -1660,7 +1660,7 @@ contain missing values.</li>
 <ul>
 <li>Standardise continuous X or Z columns beforehand.</li>
 <li>Standardise 0/1 dummy variables.</li>
-<li>Min-max scale Gaussian outcomes beforehand.</li>
+<li>Standardise Gaussian outcomes beforehand.</li>
 </ul>
 <p><code>msrrr_cv()</code> performs these transformations internally.
 Within every CV iteration, parameters are learned from the training
@@ -1708,8 +1708,8 @@ the log link.</p>
 <ol style="list-style-type: decimal">
 <li>Continuous X/Z means and standard deviations are learned jointly
 from the remaining training folds.</li>
-<li>Gaussian-outcome minima and maxima are learned from those training
-folds.</li>
+<li>Gaussian-outcome means and standard deviations are learned from
+those training folds.</li>
 <li>The validation fold is transformed using those training
 parameters.</li>
 <li>Every candidate rank/lambda combination is evaluated.</li>
@@ -1735,6 +1735,15 @@ computation time. Initialisation is reset before the next fold, so no
 fitted solution is carried between validation splits. Set
 <code>warm = FALSE</code> to initialise every candidate lambda
 independently.</p>
+<p>When <code>lamseq = NULL</code>, the user does not need to choose
+numerical limits. The function obtains a data-driven reference
+summarising the overall relationship between exposures and outcomes,
+then creates <code>nlam</code> log-spaced values from very strong to
+very weak penalisation. The same grid is used for every rank and fold.
+Technically, after preprocessing it defines
+<code>lambda_base = 1.1 * spectral_norm(crossprod(X, Y)) / n</code> and
+tests values from <code>10 * lambda_base</code> down to
+<code>1e-4 * lambda_base</code>.</p>
 <p>After CV, the selected model is fitted to the complete development
 sample. The external test set must be passed on its original analysis
 scale. The tutorial uses <code>predict()</code> for both training- and
@@ -1743,8 +1752,8 @@ continuous X/Z columns using the means and standard deviations stored in
 the fitted object, while 0/1 dummy variables remain unchanged. If
 <code>Y.new</code> is supplied to calculate prediction performance, its
 Gaussian outcomes are also transformed using the stored
-development-sample minima and maxima. The test set does not contribute
-to estimating any of these parameters.</p>
+development-sample means and standard deviations. The test set does not
+contribute to estimating any of these parameters.</p>
 <div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" tabindex="-1"></a>test_prediction <span class="ot">&lt;-</span> <span class="fu">predict</span>(</span>
 <span id="cb3-2"><a href="#cb3-2" tabindex="-1"></a>  fit,</span>
 <span id="cb3-3"><a href="#cb3-3" tabindex="-1"></a>  <span class="at">X.new =</span> X_test,</span>
@@ -1824,17 +1833,17 @@ rows than that rank</td>
 <td>Include and inspect lower ranks</td>
 </tr>
 <tr class="even">
-<td>Selected lambda is an endpoint</td>
-<td>The penalty path may be too narrow</td>
-<td>Inspect the complete CV curve and, when the optimum may lie beyond
-the tested range, extend <code>lamseq</code> and reassess</td>
+<td>Rank-specific optimal lambda is an endpoint</td>
+<td>The penalty path may be too narrow for that rank, which could affect
+the rank/lambda combination selected overall</td>
+<td>Review the affected ranks and consider rerunning all ranks with the
+common <code>lamseq</code> printed by the warning</td>
 </tr>
 <tr class="odd">
-<td>Largest lambda still selects exposures</td>
-<td>The path does not reach an exposure-free model</td>
-<td>Consider a larger bound, but assess whether stronger penalisation is
-scientifically useful and whether validation loss deteriorates
-materially</td>
+<td>Largest lambda still selects exposures for a rank</td>
+<td>The path does not reach an exposure-free model for that rank</td>
+<td>Review the affected ranks and consider rerunning all ranks with the
+tenfold-extended common <code>lamseq</code> printed by the warning</td>
 </tr>
 <tr class="even">
 <td>Rare 0/1 predictor</td>
@@ -1857,6 +1866,11 @@ modelling</td>
 </table>
 <p>Messages and warnings are stored in <code>fit$diagnostics</code> and
 may also be written to a CSV using <code>diagnostics_file</code>.</p>
+<p>The suggested sequence is common to all ranks. It extends the
+necessary endpoint tenfold and recalculates an integer number of lambda
+values to preserve approximately the existing log-scale resolution. It
+is only printed: the function does not automatically refit or repeatedly
+expand the grid.</p>
 <p>In some applications, extending the lambda sequence may add little
 useful information. For example, the validation loss can already be
 approximately flat towards weaker penalisation, while stronger
@@ -1957,8 +1971,11 @@ examine whether results depend strongly on a particular cohort.</p>
 <span id="cb7-2"><a href="#cb7-2" tabindex="-1"></a>run_penalized_loco_bootstrap <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
 <span id="cb7-3"><a href="#cb7-3" tabindex="-1"></a>run_unpenalized_loco <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span>
 <span id="cb7-4"><a href="#cb7-4" tabindex="-1"></a>run_unpenalized_loco_bootstrap <span class="ot">&lt;-</span> <span class="cn">TRUE</span></span></code></pre></div>
-<p>For every exclusion, X/Z standardisation and Gaussian-outcome scaling
-are recalculated using retained participants only.</p>
+<p>For every exclusion, the same central preprocessing rules are
+relearned using retained participants only: continuous X/Z and Gaussian
+outcomes are z-score standardised, while 0/1 variables remain unchanged.
+The corresponding LOCO bootstrap keeps that exclusion-specific
+transformation fixed.</p>
 <ul>
 <li>Penalised LOCO permits coefficient selection to change after each
 exclusion.</li>
