@@ -130,41 +130,22 @@ scale_loco_matrix <- function(M, matrix_name, drop_constant = FALSE) {
     M <- M[, !constant, drop = FALSE]
   }
 
-  binary_columns <- apply(M, 2L, is_binary_01)
-  scaled <- M
-  if (any(!binary_columns)) {
-    scaled[, !binary_columns] <- scale(
-      M[, !binary_columns, drop = FALSE]
-    )
-  }
+  # Reuse the central msRRR rule after cohort exclusion: z-score continuous
+  # columns and preserve binary 0/1 columns.
+  scaling_parameters <- .fit_standardization(M)
+  scaled <- .apply_standardization(M, scaling_parameters)
   if (any(!is.finite(scaled))) {
     stop(matrix_name, " produced non-finite values during LOCO scaling.")
   }
   scaled
 }
 
-scale_loco_outcomes <- function(Y_subset) {
-  Y_scaled <- as.matrix(Y_subset)
-  for (outcome_name in colnames(Y_scaled)) {
-    observed_values <- unique(stats::na.omit(Y_scaled[, outcome_name]))
-    if (length(observed_values) > 2L) {
-      lower <- min(Y_scaled[, outcome_name], na.rm = TRUE)
-      upper <- max(Y_scaled[, outcome_name], na.rm = TRUE)
-      if (!is.finite(lower) || !is.finite(upper) || upper <= lower) {
-        stop(
-          "Outcome ", outcome_name,
-          " is constant or invalid after cohort exclusion."
-        )
-      }
-      Y_scaled[, outcome_name] <- (
-        Y_scaled[, outcome_name] - lower
-      ) / (upper - lower)
-    }
-  }
-  Y_scaled[, "hs_bmi_c_cat"] <- as.numeric(
-    Y_scaled[, "hs_bmi_c_cat"] > 0.5
-  )
-  Y_scaled
+scale_loco_outcomes <- function(Y_subset, family, familygroup) {
+  Y_subset <- as.matrix(Y_subset)
+  # Use the same family-based rule as CV and whole-sample refits. Parameters
+  # are deliberately relearned from the cohorts retained in this LOCO fit.
+  scaling_parameters <- .fit_y_scaling(Y_subset, family, familygroup)
+  .apply_y_scaling(Y_subset, scaling_parameters)
 }
 
 run_one_penalized_loco_bootstrap <- function(

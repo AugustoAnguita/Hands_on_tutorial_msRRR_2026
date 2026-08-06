@@ -1,5 +1,5 @@
 ## engine: msRRR algorithm via MM + SRRR
-## VERSION: v4 (31 July 2026)
+## VERSION: v4 (6 August 2026)
 ## ORIGINAL METHODOLOGY AND v3 IMPLEMENTATION: Augusto Anguita-Ruiz
 ## v4 UPDATES, ROBUSTNESS AND MAINTENANCE: María Arteaga Jover
 ## CONTACT: m.arteagajover@gmail.com
@@ -11,10 +11,11 @@
 ##    final penalised model selects fewer exposures than its selected rank,
 ##    because its effective coefficient rank must then be lower. Infeasible
 ##    requested ranks are not removed automatically.
-## B) Lambda range: warns when CV selects either endpoint and when the largest
-##    lambda still leaves any exposure selected. Warnings report the tested
-##    endpoint and a suggested next bound. A sparse solution at the smallest
-##    lambda is not itself treated as an error.
+## B) Lambda range: checks every candidate rank, warning when its CV optimum is
+##    at either endpoint or its largest lambda still selects exposures. It then
+##    proposes (without running) a common grid for all ranks, extended tenfold
+##    where needed and with an integer size that preserves the log resolution.
+##    A sparse solution at the smallest lambda is not itself treated as an error.
 ## C) CV criterion: for all-Gaussian outcomes, notes that pMSE may be preferable
 ##    when outcomes have different scales. For any non-Gaussian outcome, warns
 ##    when pMSE is requested and recommends deviance.
@@ -36,13 +37,13 @@
 ## - msrrr_cv() and msrrr_cv.tuning() provide the recommended self-contained
 ##   CV workflow. IMPORTANT: supply analysis-ready numeric X, Z and Y matrices
 ##   after variable coding/dummy creation but before standardisation or outcome
-##   scaling. Do not pass matrices that have already been standardised or
-##   min-max scaled. Within each CV iteration, preprocessing parameters are
+##   scaling. Do not pass matrices that have already been standardised. Within
+##   each CV iteration, preprocessing parameters are
 ##   estimated using only the training folds and then applied unchanged to
 ##   validation.
-##   Continuous X/Z columns are standardised, 0/1 columns remain unchanged,
-##   Gaussian outcomes are scaled using training-fold minima/maxima, and
-##   non-Gaussian outcomes remain on their original scales. The final selected
+##   Continuous X/Z columns and Gaussian outcomes are z-score standardised,
+##   0/1 X/Z columns remain unchanged, and non-Gaussian outcomes remain on
+##   their original scales. The final selected
 ##   model is refitted after learning preprocessing from the complete dataset
 ##   passed to msrrr_cv(), and those parameters are stored for prediction.
 ##
@@ -107,6 +108,14 @@
 ##    fractional weights and produced the misleading warning "non-integer
 ##    #successes in a binomial glm!" even when the response contained only
 ##    0/1 values.
+## 18) Z-score standardises Gaussian outcomes instead of min-max scaling them.
+##    The same family-based preprocessing is used by CV, whole-sample refits,
+##    prediction and LOCO; each bootstrap keeps its parent fit's transformation
+##    fixed. Legacy fitted objects storing min-max parameters remain usable for
+##    transformation and prediction.
+## 19) Uses warm = FALSE by default in the recommended msrrr_cv() workflow, so
+##    every rank/lambda fit starts independently. The historical msrrr() and
+##    msrrr.tuning() compatibility interfaces retain their original defaults.
 
 require(glmnet)
 require(rrpack)
@@ -361,51 +370,133 @@ require(rrpack)
     )
   }
 
-  # Practical check B) Warn when lambda selection reaches either path endpoint.
-  min_lambda <- min(object$lamseq)
-  max_lambda <- max(object$lamseq)
+  # Practical check B) Inspect the complete lambda path for every candidate
+  # rank, not only for the rank selected by CV. A truncated path in another
+  # rank could conceal a better rank/lambda combination.
+  rank_objects <- object$out.allrank
+  if (is.null(rank_objects)) rank_objects <- list(object)
+  rank_values <- vapply(
+    rank_objects,
+    function(rank_object) as.integer(rank_object$nrank),
+    integer(1)
+  )
+  common_lamseq <- object$lamseq
+  min_lambda <- min(common_lamseq)
+  max_lambda <- max(common_lamseq)
   format_lambda <- function(value) {
     formatC(value, format = "e", digits = 4)
   }
-  if (object$lam.opt == min_lambda && min_lambda > 0) {
-    warning(
-      "The selected lambda is the smallest value tested (",
-      format_lambda(min_lambda),
-      "). A less penalised model may perform better. Consider extending ",
-      "lamseq towards zero; for example, test a lower bound of ",
-      format_lambda(min_lambda / 10), " while retaining the current range.",
-      call. = FALSE
-    )
-  }
-  if (object$lam.opt == max_lambda) {
-    warning(
-      "The selected lambda is the largest value tested (",
-      format_lambda(max_lambda),
-      "). A more strongly penalised model may perform better. Consider ",
-      "extending the upper end of lamseq; for example, test an upper bound of ",
-      format_lambda(max_lambda * 10), ".",
-      call. = FALSE
-    )
-  }
 
-  largest_index <- which.max(object$lamseq)
-  A_largest <- .as_matrix_dim(
-    object$Apath[largest_index, , ],
-    nrow = p, ncol = object$nrank
+  optimal_at_min <- vapply(
+    rank_objects,
+    function(rank_object) rank_object$lam.opt == min(rank_object$lamseq),
+    logical(1)
   )
-  V_largest <- .as_matrix_dim(
-    object$Vpath[largest_index, , ],
-    nrow = q, ncol = object$nrank
+  optimal_at_max <- vapply(
+    rank_objects,
+    function(rank_object) rank_object$lam.opt == max(rank_object$lamseq),
+    logical(1)
   )
-  B_largest <- A_largest %*% t(V_largest)
-  active_at_largest <- count_selected_exposures(B_largest, tol = tol)
-  if (active_at_largest > 0L) {
+  active_at_max <- vapply(
+    rank_objects,
+    function(rank_object) {
+      largest_index <- which.max(rank_object$lamseq)
+      A_largest <- .as_matrix_dim(
+        rank_object$Apath[largest_index, , ],
+        nrow = p, ncol = rank_object$nrank
+      )
+      V_largest <- .as_matrix_dim(
+        rank_object$Vpath[largest_index, , ],
+        nrow = q, ncol = rank_object$nrank
+      )
+      count_selected_exposures(A_largest %*% t(V_largest), tol = tol)
+    },
+    integer(1)
+  )
+
+  extend_lower <- min_lambda > 0 && any(optimal_at_min)
+  extend_upper <- any(optimal_at_max) || any(active_at_max > 0L)
+
+  if (extend_lower || extend_upper) {
+    proposed_min <- if (extend_lower) min_lambda / 10 else min_lambda
+    proposed_max <- if (extend_upper) max_lambda * 10 else max_lambda
+
+    # Preserve approximately the current number of positive lambda intervals
+    # per log10 decade. ceiling() followed by as.integer() guarantees that the
+    # suggested length.out is a whole number and never reduces path resolution.
+    positive_lambdas <- sort(unique(common_lamseq[common_lamseq > 0]))
+    if (length(positive_lambdas) >= 2L &&
+        max(positive_lambdas) > min(positive_lambdas) &&
+        proposed_min > 0) {
+      current_decades <- log10(
+        max(positive_lambdas) / min(positive_lambdas)
+      )
+      proposed_decades <- log10(proposed_max / proposed_min)
+      intervals_per_decade <-
+        (length(positive_lambdas) - 1L) / current_decades
+      proposed_positive_n <- as.integer(
+        ceiling(intervals_per_decade * proposed_decades) + 1L
+      )
+    } else {
+      proposed_positive_n <- as.integer(max(2L, length(positive_lambdas)))
+    }
+    include_zero <- any(common_lamseq == 0)
+    proposed_nlam <- as.integer(proposed_positive_n + as.integer(include_zero))
+
+    details <- character()
+    if (any(optimal_at_min)) {
+      details <- c(
+        details,
+        paste0(
+          "CV selects the smallest lambda for rank(s) ",
+          paste(rank_values[optimal_at_min], collapse = ", "), "."
+        )
+      )
+    }
+    if (any(optimal_at_max)) {
+      details <- c(
+        details,
+        paste0(
+          "CV selects the largest lambda for rank(s) ",
+          paste(rank_values[optimal_at_max], collapse = ", "), "."
+        )
+      )
+    }
+    if (any(active_at_max > 0L)) {
+      affected <- which(active_at_max > 0L)
+      details <- c(
+        details,
+        paste0(
+          "The largest lambda still selects exposures for rank(s) ",
+          paste0(
+            rank_values[affected], " (n = ", active_at_max[affected], ")",
+            collapse = ", "
+          ), "."
+        )
+      )
+    }
+
+    sequence_code <- if (include_zero) {
+      paste0(
+        "lamseq <- sort(unique(c(0, 10^seq(log10(",
+        format_lambda(proposed_max), "), log10(",
+        format_lambda(proposed_min), "), length.out = ",
+        proposed_positive_n, "L))), decreasing = TRUE)"
+      )
+    } else {
+      paste0(
+        "lamseq <- 10^seq(log10(", format_lambda(proposed_max),
+        "), log10(", format_lambda(proposed_min),
+        "), length.out = ", proposed_nlam, "L)"
+      )
+    }
+
     warning(
-      "The largest lambda tested (", format_lambda(max_lambda),
-      ") still selects ", active_at_largest,
-      " exposure(s). The lambda path does not reach an exposure-free model. ",
-      "Consider extending its upper end; for example, test at least ",
-      format_lambda(max_lambda * 10), " and reassess.",
+      paste(details, collapse = " "), " ",
+      "The common lambda grid may not cover the optimum for every rank. ",
+      "Rerun all ranks with the following common sequence (",
+      proposed_nlam, " total lambda values, preserving approximately the ",
+      "current log-scale resolution):\n", sequence_code,
       call. = FALSE
     )
   }
@@ -1099,37 +1190,59 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
   is_gaussian <- vapply(
     spec$fg, function(fm) identical(fm$family, "gaussian"), logical(1)
   )
-  lower <- rep(0, ncol(Y))
-  range <- rep(1, ncol(Y))
-  names(lower) <- names(range) <- colnames(Y)
+  center <- rep(0, ncol(Y))
+  scale <- rep(1, ncol(Y))
+  names(center) <- names(scale) <- colnames(Y)
 
   for (j in which(is_gaussian)) {
-    observed <- Y[, j]
-    lower[j] <- min(observed, na.rm = TRUE)
-    upper_j <- max(observed, na.rm = TRUE)
-    range[j] <- upper_j - lower[j]
-    if (!is.finite(range[j]) || range[j] <= 0) range[j] <- 1
+    center[j] <- mean(Y[, j], na.rm = TRUE)
+    scale[j] <- stats::sd(Y[, j], na.rm = TRUE)
+    if (!is.finite(center[j])) center[j] <- 0
+    if (!is.finite(scale[j]) || scale[j] <= 0) scale[j] <- 1
   }
 
-  list(lower = lower, range = range, is_gaussian = is_gaussian)
+  list(
+    center = center, scale = scale, is_gaussian = is_gaussian,
+    method = "zscore"
+  )
 }
 
 .apply_y_scaling <- function(Y, parameters) {
   Y <- as.matrix(Y)
-  if (ncol(Y) != length(parameters$lower)) {
+  parameter_length <- if (!is.null(parameters$center)) {
+    length(parameters$center)
+  } else {
+    length(parameters$lower)
+  }
+  if (ncol(Y) != parameter_length) {
     stop("Y does not match the stored preprocessing parameters.")
   }
   out <- Y
   gaussian <- which(parameters$is_gaussian)
   if (length(gaussian) > 0L) {
-    out[, gaussian] <- sweep(
-      Y[, gaussian, drop = FALSE],
-      2L, parameters$lower[gaussian], FUN = "-"
-    )
-    out[, gaussian] <- sweep(
-      out[, gaussian, drop = FALSE],
-      2L, parameters$range[gaussian], FUN = "/"
-    )
+    if (!is.null(parameters$center) && !is.null(parameters$scale)) {
+      out[, gaussian] <- sweep(
+        Y[, gaussian, drop = FALSE],
+        2L, parameters$center[gaussian], FUN = "-"
+      )
+      out[, gaussian] <- sweep(
+        out[, gaussian, drop = FALSE],
+        2L, parameters$scale[gaussian], FUN = "/"
+      )
+    } else if (!is.null(parameters$lower) && !is.null(parameters$range)) {
+      # Backward compatibility for objects fitted before Gaussian outcomes
+      # changed from min-max scaling to z-score standardisation.
+      out[, gaussian] <- sweep(
+        Y[, gaussian, drop = FALSE],
+        2L, parameters$lower[gaussian], FUN = "-"
+      )
+      out[, gaussian] <- sweep(
+        out[, gaussian, drop = FALSE],
+        2L, parameters$range[gaussian], FUN = "/"
+      )
+    } else {
+      stop("Stored Y preprocessing parameters are incomplete.")
+    }
   }
   dimnames(out) <- dimnames(Y)
   out
@@ -1163,7 +1276,7 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
 
 ## Robust CV tuning implementation
 msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=NULL, 
-                        lamseq=NULL, nlam=50, warm=T,  # lam.max, lam.min, 
+                        lamseq=NULL, nlam=50, warm=FALSE,  # lam.max, lam.min, 
                         method='CV', cv.criteria='pMSE', foldid=NULL, nfold=5, c.BIC=2, 
                         # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
                         control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T),
@@ -1434,7 +1547,7 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
 ## final wrapper: select nrank  
 # Z may be supplied with or without an intercept column
 .msrrr_cv_impl <- function(Y, X, Z=NULL, family, familygroup = NULL, nrankseq=c(1:3), init=NULL, 
-                 lamseq=NULL, nlam=50, warm=T,   
+                 lamseq=NULL, nlam=50, warm=FALSE,   
                  method='CV', cv.criteria='pMSE', foldid=NULL, nfold=5, c.BIC=2, 
                  # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
                  control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T),
@@ -1540,7 +1653,7 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
 ## default. Supplying diagnostics_file additionally writes that table to disk.
 msrrr_cv <- function(
     Y, X, Z = NULL, family, familygroup = NULL, nrankseq = c(1:3),
-    init = NULL, lamseq = NULL, nlam = 50, warm = TRUE,
+    init = NULL, lamseq = NULL, nlam = 50, warm = FALSE,
     method = "CV", cv.criteria = "pMSE", foldid = NULL, nfold = 5,
     c.BIC = 2,
     control = list(epsilon = 1e-4, maxit = 200, trace = FALSE,
