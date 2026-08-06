@@ -66,20 +66,36 @@ report_nas <- function(data_obj, name) {
                  " (", pct_complete, "%)"))
 }
 
-get_prop <- function(data_vec) {
-  tab <- table(factor(data_vec, levels = all_levels, exclude = NULL))
+get_prop <- function(
+    data_vec,
+    levels = get0("all_levels", ifnotfound = NULL, inherits = TRUE)) {
+  if (is.null(levels)) {
+    levels <- names(table(data_vec, useNA = "always"))
+  }
+  tab <- table(factor(data_vec, levels = levels, exclude = NULL))
   return(round(prop.table(tab), 3))
 }
 
 fill_results <- function(row_idx, model_obj) {
-  results_df$Opt_Rank[row_idx]    <<- model_obj$nrank
-  results_df$Opt_Lambda[row_idx]  <<- model_obj$lam.opt
+  updated_results <- results_df
+  updated_results$Opt_Rank[row_idx] <- model_obj$nrank
+  updated_results$Opt_Lambda[row_idx] <- model_obj$lam.opt
   # Count selected predictors (non-zero coefficients in B matrix)
-  results_df$N_Exposures[row_idx] <<- sum(
-    rowSums(abs(model_obj$fit$B) > selection_tol) > 0
+  updated_results$N_Exposures[row_idx] <- count_selected_exposures(
+    model_obj, tol = selection_tol
   )
-  # Extract the minimum deviance from the tuning path
-  results_df$CV_Crit_value[row_idx] <<- unlist(model_obj$tunepath.opt)[which.min(unlist(model_obj$tunepath.opt))]
+  # Extract the best value for the selected CV criterion.
+  criterion_column <- intersect(
+    c("CV_Crit_Value", "CV_Crit_value", "CV_Deviance"),
+    names(updated_results)
+  )[1L]
+  if (is.na(criterion_column)) {
+    stop("results_df has no recognised CV-criterion column.")
+  }
+  updated_results[[criterion_column]][row_idx] <- min(
+    unlist(model_obj$tunepath.opt), na.rm = TRUE
+  )
+  results_df <<- updated_results
 }
 
 # Return TRUE only when every observed value is coded as 0 or 1. Keeping this

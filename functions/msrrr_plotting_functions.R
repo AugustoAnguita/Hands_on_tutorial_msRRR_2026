@@ -100,7 +100,10 @@ generate_diagnostics <- function(model_obj, scenario_name, cv.crit) {
     labs(
       x = "Lambda (log scale)",
       y = paste("CV", cv.crit),
-      title = paste("Regularization path:", cv.crit, "across folds")
+      title = paste("Regularization path:", cv.crit, "across folds"),
+      subtitle = paste(
+        "Lambdas are displayed from stronger to weaker penalisation."
+      )
     )
 
   # Return as grob, without drawing immediately
@@ -163,7 +166,7 @@ get_pro_breaks <- function(mat) {
 plot_final_heatmap <- function(
     model_obj, X_matrix, scenario_name,
     outcome_names = NULL, vars_info_table = NULL,
-    pregnancy_exposure_names = NULL,
+    pregnancy_exposure_names = NULL, exposure_display_names = NULL,
     tol = get0("selection_tol", ifnotfound = 1e-8, inherits = TRUE),
     draw = TRUE) {
 
@@ -211,18 +214,17 @@ plot_final_heatmap <- function(
   if (is.null(vars_info_table)) {
     vars_info_table <- get0("vars_info", ifnotfound = NULL, inherits = TRUE)
   }
-  if (is.null(vars_info_table)) {
-    stop("vars_info_table must be supplied (or vars_info must exist).")
+  df_row_ann <- NULL
+  if (!is.null(vars_info_table)) {
+    clean_names <- gsub("_None|_Ter_2|_Ter_3", "", rownames(coef_subset))
+    row_info <- vars_info_table %>%
+      dplyr::filter(variable_name %in% clean_names) %>%
+      dplyr::distinct(variable_name, .keep_all = TRUE)
+    df_row_ann <- data.frame(
+      Family = row_info$family[match(clean_names, row_info$variable_name)],
+      row.names = rownames(coef_subset)
+    )
   }
-  clean_names <- gsub("_None|_Ter_2|_Ter_3", "", rownames(coef_subset))
-  row_info <- vars_info_table %>% 
-    dplyr::filter(variable_name %in% clean_names) %>%
-    dplyr::distinct(variable_name, .keep_all = TRUE)
-
-  df_row_ann <- data.frame(
-    Family = row_info$family[match(clean_names, row_info$variable_name)],
-    row.names = rownames(coef_subset)
-  )
 
   # Add the life-period annotation to Combined CV and whole-sample heatmaps.
   if (grepl("^Combined", scenario_name)) {
@@ -242,6 +244,9 @@ plot_final_heatmap <- function(
       }
       pregnancy_exposure_names <- colnames(pregnancy_matrix)
     }
+    if (is.null(df_row_ann)) {
+      df_row_ann <- data.frame(row.names = rownames(coef_subset))
+    }
     df_row_ann$Period <- ifelse(
       rownames(coef_subset) %in% pregnancy_exposure_names,
       "Pregnancy", "Childhood"
@@ -251,20 +256,33 @@ plot_final_heatmap <- function(
   # Use separate, explicit palettes for exposure family and life period. This
   # prevents (for example) Childhood and PFAS receiving the same annotation
   # colour merely because pheatmap generated both palettes automatically.
-  observed_families <- unique(stats::na.omit(df_row_ann$Family))
-  annotation_colors <- list(
-    Family = stats::setNames(
-      grDevices::hcl.colors(
-        max(3L, length(observed_families)), palette = "Dark 3"
-      )[seq_along(observed_families)],
-      observed_families
+  annotation_colors <- NULL
+  if (!is.null(df_row_ann) && "Family" %in% names(df_row_ann)) {
+    observed_families <- unique(stats::na.omit(df_row_ann$Family))
+    annotation_colors <- list(
+      Family = stats::setNames(
+        grDevices::hcl.colors(
+          max(3L, length(observed_families)), palette = "Dark 3"
+        )[seq_along(observed_families)],
+        observed_families
+      )
     )
-  )
-  if ("Period" %in% names(df_row_ann)) {
+  }
+  if (!is.null(df_row_ann) && "Period" %in% names(df_row_ann)) {
+    if (is.null(annotation_colors)) annotation_colors <- list()
     annotation_colors$Period <- c(
       Pregnancy = "#6A3D9A",
       Childhood = "#00A6D6"
     )
+  }
+
+  if (!is.null(exposure_display_names)) {
+    if (length(exposure_display_names) != nrow(B_mat)) {
+      stop("exposure_display_names must contain one name per exposure.")
+    }
+    display_lookup <- stats::setNames(exposure_display_names, rownames(B_mat))
+    rownames(coef_subset) <- display_lookup[rownames(coef_subset)]
+    if (!is.null(df_row_ann)) rownames(df_row_ann) <- rownames(coef_subset)
   }
 
   p <- pheatmap::pheatmap(
@@ -485,6 +503,35 @@ save_grob_svg <- function(grob, file_name, width, height) {
 }
 
 
+# Calculate a compact but safe canvas height without changing cell dimensions.
+# PDF pages can remain fixed; this helper is intended for SVG and HTML output.
+heatmap_canvas_height <- function(
+    n_rows, cellheight = 13, base_height = 4.5,
+    min_height = 7, max_height = 30) {
+  n_rows <- max(0L, as.integer(n_rows)[1L])
+  calculated <- base_height + n_rows * cellheight / 72
+  min(max_height, max(min_height, calculated))
+}
+
+
+loco_summary_n_rows <- function(loco_summary, rows_to_plot = NULL) {
+  n_selected <- loco_summary$n_selected
+  if (is.null(rows_to_plot)) {
+    return(sum(rowSums(n_selected > 0L) > 0L))
+  }
+  if (is.character(rows_to_plot)) return(length(unique(rows_to_plot)))
+  sum(as.logical(rows_to_plot), na.rm = TRUE)
+}
+
+
+model_heatmap_n_rows <- function(
+    model_obj, tol = get0("selection_tol", ifnotfound = 1e-8, inherits = TRUE)) {
+  B_mat <- if (!is.null(model_obj$fit)) model_obj$fit$B else model_obj$B
+  if (is.null(B_mat)) return(0L)
+  sum(rowSums(abs(B_mat) > tol, na.rm = TRUE) > 0L)
+}
+
+
 export_loco_summary_svg <- function(
     file_name, loco_summary, scenario_name, selection_definition,
     method_label) {
@@ -505,7 +552,10 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
                                   scenario_name,
                                   sel_prob_threshold = 0.90,
                                   sign_consistency_threshold = 0.80,
-                                  require_sign_consistency = FALSE) {
+                                  require_sign_consistency = FALSE,
+                                  outcome_display_names = NULL,
+                                  exposure_display_names = NULL,
+                                  vars_info_table = NULL) {
 
   filter_label <- if(require_sign_consistency) {
     paste0("sel_prob >= ", sel_prob_threshold,
@@ -568,15 +618,35 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
 
   # F. ROW ANNOTATIONS (Families)
   # ----------------------------------------------------------------------------
-  clean_names <- gsub("_None|_Ter_2|_Ter_3", "", rownames(coef_subset))
-  row_info <- vars_info %>% 
-    dplyr::filter(variable_name %in% clean_names) %>%
-    dplyr::distinct(variable_name, .keep_all = TRUE)
+  if (is.null(vars_info_table)) {
+    vars_info_table <- get0("vars_info", ifnotfound = NULL, inherits = TRUE)
+  }
+  df_row_ann <- NULL
+  if (!is.null(vars_info_table)) {
+    clean_names <- gsub("_None|_Ter_2|_Ter_3", "", rownames(coef_subset))
+    row_info <- vars_info_table %>%
+      dplyr::filter(variable_name %in% clean_names) %>%
+      dplyr::distinct(variable_name, .keep_all = TRUE)
+    df_row_ann <- data.frame(
+      Family = row_info$family[match(clean_names, row_info$variable_name)],
+      row.names = rownames(coef_subset)
+    )
+  }
 
-  df_row_ann <- data.frame(
-    Family = row_info$family[match(clean_names, row_info$variable_name)],
-    row.names = rownames(coef_subset)
-  )
+  if (!is.null(exposure_display_names)) {
+    if (length(exposure_display_names) != nrow(B_orig)) {
+      stop("exposure_display_names must contain one name per exposure.")
+    }
+    display_lookup <- stats::setNames(exposure_display_names, rownames(B_orig))
+    rownames(coef_subset) <- display_lookup[rownames(coef_subset)]
+    if (!is.null(df_row_ann)) rownames(df_row_ann) <- rownames(coef_subset)
+  }
+  if (!is.null(outcome_display_names)) {
+    if (length(outcome_display_names) != ncol(coef_subset)) {
+      stop("outcome_display_names must contain one name per outcome.")
+    }
+    colnames(coef_subset) <- outcome_display_names
+  }
 
   # G. RENDER PHEATMAP
   # ----------------------------------------------------------------------------
@@ -594,7 +664,8 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
     silent            = TRUE
   )
 
-  print(p)
+  grid::grid.draw(p$gtable)
+  invisible(p)
 }
 
 
