@@ -11,7 +11,7 @@
 
 <meta name="author" content="Augusto Anguita-Ruiz — Original methodology and implementation | María Arteaga Jover — Updates, robustness and workflow maintenance" />
 
-<meta name="date" content="2026-08-06" />
+<meta name="date" content="2026-08-07" />
 
 <title>msRRR v4: Quick-Start Guide</title>
 
@@ -1563,7 +1563,7 @@ interpretation</h3>
 <h4 class="author">Augusto Anguita-Ruiz — Original methodology and
 implementation | María Arteaga Jover — Updates, robustness and workflow
 maintenance</h4>
-<h4 class="date">August 06, 2026</h4>
+<h4 class="date">August 07, 2026</h4>
 
 </div>
 
@@ -1655,6 +1655,12 @@ dummy variables, normally using one category as the reference.</li>
 order.</li>
 <li>Handle missing X/Z values according to the analysis plan. Y may
 contain missing values.</li>
+<li>Inspect extreme values before constructing the final matrices.
+Correct implausible values and decide whether genuine influential
+observations require exclusion or another treatment using subject-matter
+knowledge and a documented, analysis-specific rule. The pipeline does
+not remove or winsorise outliers automatically because the appropriate
+decision is case-specific.</li>
 </ul>
 <p>Do <strong>not</strong>:</p>
 <ul>
@@ -1684,7 +1690,7 @@ development sample and stored for prediction.</p>
 <span id="cb2-11"><a href="#cb2-11" tabindex="-1"></a>  <span class="at">nfold =</span> <span class="dv">5</span>,</span>
 <span id="cb2-12"><a href="#cb2-12" tabindex="-1"></a>  <span class="at">method =</span> <span class="st">&quot;CV&quot;</span>,</span>
 <span id="cb2-13"><a href="#cb2-13" tabindex="-1"></a>  <span class="at">cv.criteria =</span> <span class="st">&quot;deviance&quot;</span>,</span>
-<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>  <span class="at">warm =</span> <span class="cn">TRUE</span>,</span>
+<span id="cb2-14"><a href="#cb2-14" tabindex="-1"></a>  <span class="at">warm =</span> <span class="cn">FALSE</span>,</span>
 <span id="cb2-15"><a href="#cb2-15" tabindex="-1"></a>  <span class="at">diagnostics =</span> <span class="cn">TRUE</span>,</span>
 <span id="cb2-16"><a href="#cb2-16" tabindex="-1"></a>  <span class="at">print_diagnostics_at_end =</span> <span class="cn">TRUE</span>,</span>
 <span id="cb2-17"><a href="#cb2-17" tabindex="-1"></a>  <span class="at">diagnostics_file =</span> <span class="fu">file.path</span>(</span>
@@ -1727,14 +1733,23 @@ loss calculated as twice the negative log-likelihood on the validation
 observations. It is not the classical residual deviance relative to a
 saturated model. Lower values are better for both criteria.</li>
 </ul>
+<p>The rank/lambda combination preferred by cross-validation can
+legitimately be an exposure-free model. In that case, all exposure
+coefficients are zero while the adjustment covariates in Z remain in the
+model. This means that none of the tested exposures improves the
+selected out-of-sample criterion sufficiently under the fitted model; it
+is a valid result rather than a computational failure. It should be
+reported transparently and should not be replaced by a less penalised
+solution merely to obtain selected exposures.</p>
 <p>A common lambda sequence is used across folds, and a user-supplied
-<code>lamseq</code> is ordered from larger to smaller values. Warm
-starts proceed in that order within a fold: the solution for one lambda
-is used as the starting point for the next, which usually reduces
-computation time. Initialisation is reset before the next fold, so no
-fitted solution is carried between validation splits. Set
-<code>warm = FALSE</code> to initialise every candidate lambda
-independently.</p>
+<code>lamseq</code> is ordered from larger to smaller values. By
+default, <code>warm = FALSE</code>, so every lambda starts independently
+from its ridge/SVD initialisation and does not depend on the preceding
+lambda solution. This does not guarantee a global optimum, but avoids
+dependence on the path spacing. Set <code>warm = TRUE</code> when the
+independent fits are computationally impractical; warm starts remain
+confined to the same rank and training fold and therefore do not create
+data leakage.</p>
 <p>When <code>lamseq = NULL</code>, the user does not need to choose
 numerical limits. The function obtains a data-driven reference
 summarising the overall relationship between exposures and outcomes,
@@ -1833,29 +1848,37 @@ rows than that rank</td>
 <td>Include and inspect lower ranks</td>
 </tr>
 <tr class="even">
+<td>The selected model contains no exposures</td>
+<td>CV preferred an exposure-free model; the adjustment covariates in Z
+are still retained</td>
+<td>Confirm that the CV curve, lambda grid and diagnostics are coherent,
+then treat the absence of selected exposures as a valid possible result
+rather than forcing a non-null model</td>
+</tr>
+<tr class="odd">
 <td>Rank-specific optimal lambda is an endpoint</td>
 <td>The penalty path may be too narrow for that rank, which could affect
 the rank/lambda combination selected overall</td>
 <td>Review the affected ranks and consider rerunning all ranks with the
 common <code>lamseq</code> printed by the warning</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>Largest lambda still selects exposures for a rank</td>
 <td>The path does not reach an exposure-free model for that rank</td>
 <td>Review the affected ranks and consider rerunning all ranks with the
 tenfold-extended common <code>lamseq</code> printed by the warning</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>Rare 0/1 predictor</td>
 <td>A category has limited representation</td>
 <td>Inspect counts overall and within folds</td>
 </tr>
-<tr class="odd">
+<tr class="even">
 <td>High outcome missingness</td>
 <td>Limited observed information may reduce stability</td>
 <td>Review missingness patterns and sensitivity analyses</td>
 </tr>
-<tr class="even">
+<tr class="odd">
 <td>More than half of outcome pairs have <span class="math inline">\(|r|
 &lt; 0.25\)</span></td>
 <td>Shared outcome structure may be limited</td>
@@ -1954,6 +1977,11 @@ interpretation and are not reported.</p>
 fixed. The model is refitted with <code>lambda = 0</code>, and every
 bootstrap fits that same subset and rank using
 <code>init = NULL</code>.</p>
+<p>If the penalised whole-sample model selects no exposures, there is no
+selected subset to refit and Approach B is not applicable for that
+scenario. The workflow records this status and skips its unpenalised
+bootstrap and LOCO analysis; this does not invalidate the exposure-free
+result from Approach A.</p>
 <p>If the selected subset contains fewer exposures than the selected
 rank, the unpenalised refit reduces the rank to the largest
 mathematically feasible value.</p>
@@ -2028,6 +2056,9 @@ are scientifically and mathematically reasonable.</label></li>
 interface.</label></li>
 <li><label><input type="checkbox"></input>Lambda and rank boundary diagnostics
 have been reviewed after fitting.</label></li>
+<li><label><input type="checkbox"></input>An exposure-free model, if selected
+by CV, has been retained and reported unless a diagnostic review
+supports changing the candidate grid.</label></li>
 <li><label><input type="checkbox"></input>Rare categories, missing-outcome
 patterns and outcome relationships have been reviewed.</label></li>
 <li><label><input type="checkbox"></input>The whole-sample model was fitted
