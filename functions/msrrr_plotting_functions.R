@@ -676,8 +676,11 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
     color             = custom_colors_pro,          # Defined in Block 8
     breaks            = get_pro_breaks(coef_subset),# Defined in Block 8
     annotation_row    = df_row_ann,
+    # Preserve the original exposure and outcome order. Besides avoiding an
+    # unintended data-driven reordering, this remains valid when only one
+    # exposure survives the stability filter (hclust requires at least two).
     cluster_cols      = FALSE,
-    cluster_rows      = TRUE, # Set to FALSE to keep the same predictor order across plots
+    cluster_rows      = FALSE,
     border_color      = "white",
     fontsize_row      = 8,
     cellwidth         = 30,
