@@ -1,6 +1,6 @@
 ## =============================================================================
 ## msRRR plotting functions
-## VERSION: v1 (31 July 2026)
+## VERSION: v2 (7 August 2026)
 ## =============================================================================
 ##
 ## Reusable plotting helpers for the msRRR tutorial. Keeping these functions in
@@ -148,18 +148,19 @@ plot_coeffs <- function(model_obj, outcome_idx, X_matrix, scenario_label) {
 
 get_pro_breaks <- function(mat) {
   limit <- max(abs(mat), na.rm = TRUE)
-  if(limit == 0) limit <- 0.1
+  if (!is.finite(limit) || limit == 0) limit <- 0.1
 
-  # Build sequences from each extreme to a value very close to zero.
-  # This gives the central grey colour an almost invisible interval, ensuring
-  # that every non-zero value receives either a green or a red colour.
+  # custom_colors_pro contains 50 negative colours, one grey colour and 50
+  # positive colours. Therefore pheatmap needs exactly 102 break points for
+  # its 101 colour intervals. The single interval [-eps, eps] is grey, so exact
+  # and numerically negligible zeros are not assigned a signed colour.
   eps <- 1e-99
   breaks <- c(
     seq(-limit, -eps, length.out = 51), # 50 negative intervals
-    0,                                  # Exact zero
-    seq(eps, limit, length.out = 51)    # 50 positive intervals
+    eps,                                # One central interval: -eps to eps
+    seq(eps, limit, length.out = 51)[-1] # 50 positive intervals
   )
-  return(unique(sort(breaks)))
+  unique(sort(breaks))
 }
 
 
@@ -219,10 +220,17 @@ plot_final_heatmap <- function(
     row_info <- vars_info_table %>%
       dplyr::filter(variable_name %in% clean_names) %>%
       dplyr::distinct(variable_name, .keep_all = TRUE)
-    df_row_ann <- data.frame(
-      Family = row_info$family[match(clean_names, row_info$variable_name)],
-      row.names = rownames(coef_subset)
-    )
+    family_values <- row_info$family[
+      match(clean_names, row_info$variable_name)
+    ]
+    # Do not pass a wholly empty annotation column to pheatmap: it has no
+    # colours to map and can produce a zero-length grid fill.
+    if (any(!is.na(family_values))) {
+      df_row_ann <- data.frame(
+        Family = family_values,
+        row.names = rownames(coef_subset)
+      )
+    }
   }
 
   # Add the life-period annotation to Combined CV and whole-sample heatmaps.
@@ -634,10 +642,15 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
     row_info <- vars_info_table %>%
       dplyr::filter(variable_name %in% clean_names) %>%
       dplyr::distinct(variable_name, .keep_all = TRUE)
-    df_row_ann <- data.frame(
-      Family = row_info$family[match(clean_names, row_info$variable_name)],
-      row.names = rownames(coef_subset)
-    )
+    family_values <- row_info$family[
+      match(clean_names, row_info$variable_name)
+    ]
+    if (any(!is.na(family_values))) {
+      df_row_ann <- data.frame(
+        Family = family_values,
+        row.names = rownames(coef_subset)
+      )
+    }
   }
 
   if (!is.null(exposure_display_names)) {

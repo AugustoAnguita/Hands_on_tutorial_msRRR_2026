@@ -2,7 +2,6 @@
 ## VERSION: v4 (6 August 2026)
 ## ORIGINAL METHODOLOGY AND v3 IMPLEMENTATION: Augusto Anguita-Ruiz
 ## v4 UPDATES, ROBUSTNESS AND MAINTENANCE: María Arteaga Jover
-## CONTACT: m.arteagajover@gmail.com
 ##
 ## Practical recommendations and automatic diagnostics:
 ## A) Rank range: warns when a requested rank exceeds min(ncol(X), ncol(Y)),

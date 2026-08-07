@@ -102,6 +102,11 @@
 ##    input and reports bootstrap standard errors, normal-approximation 95%
 ##    intervals and p-values, plus percentile intervals. No
 ##    multiple-testing correction is applied automatically.
+## 9) Retains a complete set of descriptive coefficient-distribution summaries:
+##    the penalised summary reports mean, median, standard deviation and
+##    quantiles across all fits and, separately, among non-zero selected fits;
+##    the unpenalised summary reports mean, median, standard deviation (as the
+##    bootstrap standard error) and percentile quantiles.
 
 ## Raise a bootstrap error without depending on RGCCA internals.
 ## exit_code is accepted for compatibility with the inherited checks.
@@ -666,11 +671,15 @@ summarize_msrrr_bootstrap <- function(
     selection_tol = selection_tol,
     beta_original = beta_original,
     beta_boot_mean_all = rowMeans(boot_output, na.rm = TRUE),
+    beta_boot_median_all = apply(boot_output, 1L, row_median),
     beta_boot_mean_selected = rowMeans(selected_values, na.rm = TRUE),
     beta_boot_median_selected = apply(
       selected_values, 1L, row_median
     ),
     beta_boot_sd_all = apply(boot_output, 1L, stats::sd, na.rm = TRUE),
+    beta_boot_sd_selected = apply(
+      selected_values, 1L, stats::sd, na.rm = TRUE
+    ),
     beta_boot_q025_all = apply(
       boot_output, 1L, row_quantile, prob = 0.025
     ),
@@ -701,6 +710,7 @@ summarize_msrrr_bootstrap <- function(
   ## Make the intended result explicit for coefficients never selected.
   out$beta_boot_mean_selected[n_selected == 0L] <- NA_real_
   out$beta_boot_median_selected[n_selected == 0L] <- NA_real_
+  out$beta_boot_sd_selected[n_selected < 2L] <- NA_real_
 
   attr(out, "lambda") <- lambda
   attr(out, "selection_tol") <- selection_tol
@@ -792,6 +802,9 @@ summarize_msrrr_unpenalized_bootstrap <- function(
 
   beta_unpenalized <- as.vector(original_B)
   bootstrap_mean <- rowMeans(bootstrap_values, na.rm = TRUE)
+  bootstrap_median <- apply(
+    bootstrap_values, 1L, stats::median, na.rm = TRUE
+  )
   bootstrap_standard_error <- apply(
     bootstrap_values, 1L, stats::sd, na.rm = TRUE
   )
@@ -827,6 +840,7 @@ summarize_msrrr_unpenalized_bootstrap <- function(
     lambda = lambda,
     beta_unpenalized = beta_unpenalized,
     bootstrap_mean = bootstrap_mean,
+    bootstrap_median = bootstrap_median,
     bootstrap_standard_error = bootstrap_standard_error,
     ci95_lower = ci95_lower,
     ci95_upper = ci95_upper,

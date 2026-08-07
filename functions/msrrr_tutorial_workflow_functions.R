@@ -1,6 +1,6 @@
 ## =============================================================================
 ## msRRR tutorial workflow functions
-## VERSION: v1 (31 July 2026)
+## VERSION: v2 (7 August 2026)
 ## =============================================================================
 ##
 ## Reusable data-preparation, reporting, bootstrap orchestration and LOCO
