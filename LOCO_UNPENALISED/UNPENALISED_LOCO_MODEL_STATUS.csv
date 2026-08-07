@@ -1,0 +1,4 @@
+"scenario";"approach_b_available";"n_selected_exposures";"status";"reason";"included_in_unpenalized_loco"
+"Pregnancy";FALSE;0;"not_applicable_no_selected_exposures";"The penalised model selected no exposures at tolerance 1e-12 ; the conditional unpenalised refit is not applicable.";FALSE
+"Childhood";TRUE;69;"fitted";NA;TRUE
+"Combined";TRUE;97;"fitted";NA;TRUE
