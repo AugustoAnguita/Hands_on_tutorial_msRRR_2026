@@ -143,7 +143,7 @@ rm(list = ls())
 
 # Create the common output directory before any plot, checkpoint or table is
 # written. recursive = TRUE is harmless when the directory already exists.
-results_dir <- "results_r"
+results_dir <- "results"
 dir.create(results_dir, recursive = TRUE, showWarnings = FALSE)
 if (!dir.exists(results_dir)) {
   stop("The output directory could not be created: ", results_dir)
