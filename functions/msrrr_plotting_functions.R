@@ -63,10 +63,20 @@ generate_diagnostics <- function(model_obj, scenario_name, cv.crit) {
     Rank = model_obj$nrankseq,
     CV_metric = unlist(model_obj$tunepath.opt)
   )
+  rank_breaks <- if (length(unique(rank_data$Rank)) <= 15L) {
+    sort(unique(rank_data$Rank))
+  } else {
+    pretty(range(rank_data$Rank), n = 8L)
+  }
 
   p_rank <- ggplot(rank_data, aes(x = Rank, y = CV_metric)) +
     geom_line(color = "grey") + 
     geom_point(size = 3, color = "#08737f") +
+    scale_x_continuous(
+      breaks = rank_breaks,
+      limits = range(rank_data$Rank),
+      expand = expansion(mult = c(0.03, 0.03))
+    ) +
     theme_minimal() + 
     labs(
       title = paste(scenario_name, "Model: Rank vs", cv.crit),
@@ -700,7 +710,7 @@ plot_original_vs_stable <- function(
     fit_whole, boot_res, X_mat, scenario_name,
     family_filter = NULL,
     vars_info_table = NULL,
-    cellwidth = 24, cellheight = 10,
+    cellwidth = 24, cellheight = 10, fontsize_col = 7,
     draw = TRUE) {
 
   # Always return a drawable grob. Assigning NULL to a list with `[[<-`
@@ -826,6 +836,7 @@ plot_original_vs_stable <- function(
     cluster_rows = FALSE,
     border_color = "white",
     fontsize_row = 8,
+    fontsize_col = fontsize_col,
     cellwidth = cellwidth,
     cellheight = cellheight,
     silent = TRUE
