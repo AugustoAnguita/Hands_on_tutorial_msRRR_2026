@@ -201,8 +201,7 @@ plot_final_heatmap <- function(
     empty_grob <- grid::textGrob(
       paste0(
         scenario_name,
-        "\nNo exposure was selected at tolerance ",
-        format(tol, scientific = TRUE), "."
+        "\nNo exposure was selected."
       ),
       gp = grid::gpar(fontsize = 13)
     )
@@ -612,7 +611,15 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
   active_rows <- rowSums(B_stable != 0) > 0
   if(sum(active_rows) == 0) {
     message("    ! WARNING: No associations survived the stability filter.")
-    return(NULL)
+    empty_grob <- grid::textGrob(
+      paste0(
+        scenario_name,
+        ": no exposure-outcome association survived the stability filter (",
+        filter_label, ")."
+      )
+    )
+    grid::grid.draw(empty_grob)
+    return(invisible(empty_grob))
   }
   coef_subset <- B_stable[active_rows, , drop = FALSE]
 
@@ -675,6 +682,21 @@ plot_original_vs_stable <- function(
     cellwidth = 24, cellheight = 10,
     draw = TRUE) {
 
+  # Always return a drawable grob. Assigning NULL to a list with `[[<-`
+  # removes that element, which used to misalign scenario lists and caused
+  # an out-of-bounds error during the subsequent SVG export.
+  empty_comparison_grob <- function(detail) {
+    empty_grob <- gridExtra::arrangeGrob(
+      grid::textGrob(
+        paste0(scenario_name, "\n", detail),
+        gp = grid::gpar(fontsize = 14)
+      ),
+      ncol = 1
+    )
+    if (draw) grid::grid.draw(empty_grob)
+    invisible(empty_grob)
+  }
+
   B_orig <- as.matrix(fit_whole$B)
   rownames(B_orig) <- colnames(X_mat)
   colnames(B_orig) <- colnames(Y_whole)
@@ -703,7 +725,9 @@ plot_original_vs_stable <- function(
   rows_to_plot <- rowSums(abs(B_orig) > selection_tol, na.rm = TRUE) > 0
   if (!any(rows_to_plot)) {
     message("    ! No selected coefficients in: ", scenario_name)
-    return(invisible(NULL))
+    return(empty_comparison_grob(
+      "No exposures were selected by the whole-sample penalised model."
+    ))
   }
   B_orig <- B_orig[rows_to_plot, , drop = FALSE]
   B_stable <- B_stable[rows_to_plot, , drop = FALSE]
@@ -719,7 +743,11 @@ plot_original_vs_stable <- function(
     B_orig <- B_orig[keep_family, , drop = FALSE]
     B_stable <- B_stable[keep_family, , drop = FALSE]
     row_family <- row_family[keep_family]
-    if (nrow(B_orig) == 0L) return(invisible(NULL))
+    if (nrow(B_orig) == 0L) {
+      return(empty_comparison_grob(
+        paste0("No selected exposures in family: ", family_filter, ".")
+      ))
+    }
   }
 
   row_annotation <- data.frame(
@@ -888,6 +916,29 @@ plot_unpenalized_pre_post <- function(
     family_filter = NULL,
     draw = TRUE) {
 
+  empty_unpenalized_grob <- function(detail) {
+    empty_grob <- gridExtra::arrangeGrob(
+      grid::textGrob(
+        paste0(scenario_name, "\n", detail),
+        gp = grid::gpar(fontsize = 14)
+      ),
+      ncol = 1
+    )
+    if (draw) grid::grid.draw(empty_grob)
+    invisible(empty_grob)
+  }
+
+  if (!is_unpenalized_refit_available(unpenalized_object)) {
+    return(empty_unpenalized_grob(
+      "Approach B is not applicable because the penalised model selected no exposures."
+    ))
+  }
+  if (is.null(inference_results) || nrow(inference_results) == 0L) {
+    return(empty_unpenalized_grob(
+      "No conditional unpenalised bootstrap results are available."
+    ))
+  }
+
   B_unpenalized <- as.matrix(unpenalized_object$fit$B)
   rownames(B_unpenalized) <- colnames(unpenalized_object$X_selected)
   colnames(B_unpenalized) <- colnames(Y_whole)
@@ -910,7 +961,11 @@ plot_unpenalized_pre_post <- function(
   title_suffix <- scenario_name
   if (!is.null(family_filter)) {
     keep <- !is.na(row_family) & row_family == family_filter
-    if (!any(keep)) return(invisible(NULL))
+    if (!any(keep)) {
+      return(empty_unpenalized_grob(
+        paste0("No selected exposures in family: ", family_filter, ".")
+      ))
+    }
     B_unpenalized <- B_unpenalized[keep, , drop = FALSE]
     B_significant_plot <- B_significant_plot[keep, , drop = FALSE]
     row_family <- row_family[keep]

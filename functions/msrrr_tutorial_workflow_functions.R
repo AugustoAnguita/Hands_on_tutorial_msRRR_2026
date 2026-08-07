@@ -340,6 +340,53 @@ summarize_penalized_loco <- function(
   )
 }
 
+is_unpenalized_refit_available <- function(object) {
+  is.list(object) &&
+    !identical(object$available, FALSE) &&
+    !is.null(object$fit) &&
+    !is.null(object$fit$B) &&
+    !is.null(object$X_selected) &&
+    ncol(object$X_selected) > 0L
+}
+
+
+empty_unpenalized_inference <- function(reason = NA_character_) {
+  out <- data.frame(
+    exposure = character(0),
+    outcome = character(0),
+    lambda = numeric(0),
+    beta_unpenalized = numeric(0),
+    bootstrap_mean = numeric(0),
+    bootstrap_standard_error = numeric(0),
+    ci95_lower = numeric(0),
+    ci95_upper = numeric(0),
+    bootstrap_q025 = numeric(0),
+    bootstrap_q975 = numeric(0),
+    z_value = numeric(0),
+    p_value = numeric(0),
+    significant = logical(0),
+    n_valid_bootstrap = integer(0),
+    stringsAsFactors = FALSE
+  )
+  attr(out, "status") <- "not_applicable_no_selected_exposures"
+  attr(out, "reason") <- reason
+  out
+}
+
+
+unpenalized_refit_status <- function(object, scenario_name) {
+  available <- is_unpenalized_refit_available(object)
+  data.frame(
+    scenario = scenario_name,
+    approach_b_available = available,
+    n_selected_exposures = if (available) ncol(object$X_selected) else 0L,
+    status = if (!is.null(object$status)) object$status else if (available) "fitted" else "not_applicable",
+    reason = if (!is.null(object$reason)) object$reason else NA_character_,
+    stringsAsFactors = FALSE
+  )
+}
+
+
 run_unpenalized_bootstrap <- function(
     unpenalized_object,
     Y,
@@ -349,6 +396,18 @@ run_unpenalized_bootstrap <- function(
     n_boot,
     scenario_name,
     show_progress = TRUE) {
+
+  if (!is_unpenalized_refit_available(unpenalized_object)) {
+    reason <- if (!is.null(unpenalized_object$reason)) {
+      unpenalized_object$reason
+    } else {
+      "No exposures were selected by the penalised whole-sample model."
+    }
+    message(
+      ">>> [Approach B] Bootstrap skipped for ", scenario_name, ": ", reason
+    )
+    return(empty_unpenalized_inference(reason))
+  }
 
   X_selected <- unpenalized_object$X_selected
   Z_boot <- Z

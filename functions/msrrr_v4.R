@@ -1949,12 +1949,37 @@ refit_msrrr_unpenalized <- function(
 
   selected <- sqrt(rowSums(penalized_fit$B^2)) > tol
   if (!any(selected)) {
-    stop(
-      paste(
-        "The penalised model selected no exposures at tolerance", tol,
-        "; an unpenalised post-selection refit cannot be constructed."
-      )
+    reason <- paste(
+      "The penalised model selected no exposures at tolerance", tol,
+      "; the conditional unpenalised refit is not applicable."
     )
+    message("    ! ", reason)
+    exposure_names <- colnames(X)
+    if (is.null(exposure_names)) {
+      exposure_names <- paste0("X", seq_len(ncol(X)))
+    }
+    out <- list(
+      fit = NULL,
+      X_selected = X[, FALSE, drop = FALSE],
+      selected = selected,
+      selected_indices = integer(0),
+      selected_exposures = character(0),
+      requested_rank = as.integer(nrank)[1L],
+      nrank = NA_integer_,
+      lambda = 0,
+      selection_tol = tol,
+      family = object_family,
+      familygroup = object_familygroup,
+      control = control,
+      preprocessing = NULL,
+      init = init,
+      penalized_lambda = if (!is.null(object$lambda)) object$lambda else object$lam.opt,
+      available = FALSE,
+      status = "not_applicable_no_selected_exposures",
+      reason = reason
+    )
+    class(out) <- "msrrr_unpenalized_refit"
+    return(out)
   }
 
   X_selected <- X[, selected, drop = FALSE]
@@ -2035,7 +2060,10 @@ refit_msrrr_unpenalized <- function(
       object$lambda
     } else {
       object$lam.opt
-    }
+    },
+    available = TRUE,
+    status = "fitted",
+    reason = NA_character_
   )
   class(out) <- "msrrr_unpenalized_refit"
   out
