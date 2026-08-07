@@ -562,7 +562,10 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
                                   require_sign_consistency = FALSE,
                                   outcome_display_names = NULL,
                                   exposure_display_names = NULL,
-                                  vars_info_table = NULL) {
+                                  vars_info_table = NULL,
+                                  cellwidth = 30,
+                                  cellheight = 13,
+                                  draw = TRUE) {
 
   filter_label <- if(require_sign_consistency) {
     paste0("sel_prob >= ", sel_prob_threshold,
@@ -626,8 +629,8 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
         filter_label, ")."
       )
     )
-    grid::grid.draw(empty_grob)
-    return(invisible(empty_grob))
+    if (draw) grid::grid.draw(empty_grob)
+    return(invisible(list(gtable = empty_grob, matrix = B_stable)))
   }
   coef_subset <- B_stable[active_rows, , drop = FALSE]
 
@@ -683,11 +686,12 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
     cluster_rows      = FALSE,
     border_color      = "white",
     fontsize_row      = 8,
-    cellwidth         = 30,
+    cellwidth         = cellwidth,
+    cellheight        = cellheight,
     silent            = TRUE
   )
 
-  grid::grid.draw(p$gtable)
+  if (draw) grid::grid.draw(p$gtable)
   invisible(p)
 }
 
@@ -695,6 +699,7 @@ plot_stable_signature <- function(fit_whole, boot_res, X_mat,
 plot_original_vs_stable <- function(
     fit_whole, boot_res, X_mat, scenario_name,
     family_filter = NULL,
+    vars_info_table = NULL,
     cellwidth = 24, cellheight = 10,
     draw = TRUE) {
 
@@ -749,12 +754,26 @@ plot_original_vs_stable <- function(
   B_stable <- B_stable[rows_to_plot, , drop = FALSE]
 
   clean_names <- gsub("_None|_Ter_2|_Ter_3", "", rownames(B_orig))
-  row_info <- vars_info %>%
-    dplyr::filter(variable_name %in% clean_names) %>%
-    dplyr::distinct(variable_name, .keep_all = TRUE)
-  row_family <- row_info$family[match(clean_names, row_info$variable_name)]
+  if (is.null(vars_info_table)) {
+    vars_info_table <- get0("vars_info", ifnotfound = NULL, inherits = TRUE)
+  }
+  row_family <- rep(NA_character_, length(clean_names))
+  if (!is.null(vars_info_table)) {
+    row_info <- vars_info_table %>%
+      dplyr::filter(variable_name %in% clean_names) %>%
+      dplyr::distinct(variable_name, .keep_all = TRUE)
+    row_family <- row_info$family[
+      match(clean_names, row_info$variable_name)
+    ]
+  }
 
   if (!is.null(family_filter)) {
+    if (all(is.na(row_family))) {
+      stop(
+        "family_filter requires a matching vars_info_table with variable_name ",
+        "and family columns."
+      )
+    }
     keep_family <- !is.na(row_family) & row_family == family_filter
     B_orig <- B_orig[keep_family, , drop = FALSE]
     B_stable <- B_stable[keep_family, , drop = FALSE]
@@ -766,10 +785,13 @@ plot_original_vs_stable <- function(
     }
   }
 
-  row_annotation <- data.frame(
-    Family = row_family,
-    row.names = rownames(B_orig)
-  )
+  row_annotation <- NULL
+  if (any(!is.na(row_family))) {
+    row_annotation <- data.frame(
+      Family = row_family,
+      row.names = rownames(B_orig)
+    )
+  }
 
   common_limit <- max(abs(c(B_orig, B_stable)), na.rm = TRUE)
   if (!is.finite(common_limit) || common_limit <= selection_tol) {
