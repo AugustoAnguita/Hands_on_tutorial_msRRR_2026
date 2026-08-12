@@ -1,5 +1,5 @@
 ## engine: msRRR algorithm via MM + SRRR
-## VERSION: v4 (6 August 2026)
+## VERSION: v4 (12 August 2026)
 ## ORIGINAL METHODOLOGY AND v3 IMPLEMENTATION: Augusto Anguita-Ruiz
 ## v4 UPDATES, ROBUSTNESS AND MAINTENANCE: María Arteaga Jover
 ##
@@ -115,6 +115,15 @@
 ## 19) Uses warm = FALSE by default in the recommended msrrr_cv() workflow, so
 ##    every rank/lambda fit starts independently. The historical msrrr() and
 ##    msrrr.tuning() compatibility interfaces retain their original defaults.
+##
+## HELIX reproducibility extension (analysis-specific; not the default rule):
+## - msrrr_cv() accepts optional X_no_scale and Z_no_scale character vectors.
+## - NULL preserves the standard v4 behaviour: binary 0/1 columns retain their
+##   original scale and all other eligible columns are standardised.
+## - Supplied columns retain their original scale in every CV fold, the final
+##   development fit, prediction and subsequent refits. Parameters for all
+##   other columns remain leakage-free. This permits reproduction of the
+##   historical HELIX <7-distinct-values rule and is not a new recommendation.
 
 require(glmnet)
 require(rrpack)
@@ -1147,14 +1156,40 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
     all(observed %in% c(0, 1))
 }
 
-.fit_standardization <- function(M) {
+.validate_no_scale_columns <- function(M, no_scale, argument_name) {
   M <- as.matrix(M)
+  if (is.null(no_scale)) return(character(0))
+  if (!is.character(no_scale) || anyNA(no_scale) || any(!nzchar(no_scale))) {
+    stop(argument_name, " must be NULL or a character vector of column names.")
+  }
+  if (is.null(colnames(M))) {
+    stop(argument_name, " requires the corresponding matrix to have column names.")
+  }
+  if (anyDuplicated(no_scale)) no_scale <- unique(no_scale)
+  unknown <- setdiff(no_scale, colnames(M))
+  if (length(unknown) > 0L) {
+    stop(
+      argument_name, " contains column(s) not found in the corresponding matrix: ",
+      paste(unknown, collapse = ", "), "."
+    )
+  }
+  no_scale
+}
+
+.fit_standardization <- function(M, no_scale = NULL) {
+  M <- as.matrix(M)
+  no_scale <- .validate_no_scale_columns(M, no_scale, "no_scale")
   is_binary <- apply(M, 2L, .msrrr_is_binary_01)
+  excluded <- if (is.null(colnames(M))) {
+    rep(FALSE, ncol(M))
+  } else {
+    colnames(M) %in% no_scale
+  }
   center <- rep(0, ncol(M))
   scale <- rep(1, ncol(M))
   names(center) <- names(scale) <- colnames(M)
 
-  continuous <- which(!is_binary)
+  continuous <- which(!is_binary & !excluded)
   if (length(continuous) > 0L) {
     center[continuous] <- colMeans(M[, continuous, drop = FALSE], na.rm = TRUE)
     scale[continuous] <- apply(
@@ -1166,7 +1201,11 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
     scale[invalid] <- 1
   }
 
-  list(center = center, scale = scale, is_binary = is_binary)
+  list(
+    center = center, scale = scale, is_binary = is_binary,
+    no_scale = excluded,
+    no_scale_names = colnames(M)[excluded]
+  )
 }
 
 .apply_standardization <- function(M, parameters) {
@@ -1178,6 +1217,11 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
   out <- sweep(out, 2L, parameters$scale, FUN = "/")
   if (any(parameters$is_binary)) {
     out[, parameters$is_binary] <- M[, parameters$is_binary, drop = FALSE]
+  }
+  # `no_scale` was added for analysis-specific reproducibility. Older fitted
+  # objects do not contain it and retain their previous behaviour.
+  if (!is.null(parameters$no_scale) && any(parameters$no_scale)) {
+    out[, parameters$no_scale] <- M[, parameters$no_scale, drop = FALSE]
   }
   dimnames(out) <- dimnames(M)
   out
@@ -1247,10 +1291,12 @@ msrrr = function(Y, X, Z=NULL, family, familygroup, nrankseq=c(1:3), init=NULL,
   out
 }
 
-.fit_msrrr_preprocessing <- function(Y, X, Z, family, familygroup) {
+.fit_msrrr_preprocessing <- function(
+    Y, X, Z, family, familygroup,
+    X_no_scale = NULL, Z_no_scale = NULL) {
   parameters <- list(
-    X = .fit_standardization(X),
-    Z = .fit_standardization(Z),
+    X = .fit_standardization(X, no_scale = X_no_scale),
+    Z = .fit_standardization(Z, no_scale = Z_no_scale),
     Y = .fit_y_scaling(Y, family, familygroup)
   )
   list(
@@ -1279,7 +1325,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
                         method='CV', cv.criteria='pMSE', foldid=NULL, nfold=5, c.BIC=2, 
                         # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
                         control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T),
-                        progress_callback = NULL){
+                        progress_callback = NULL,
+                        X_no_scale = NULL, Z_no_scale = NULL){
   n = nrow(Y)
   q = ncol(Y)
   p = ncol(X)
@@ -1294,7 +1341,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   X_raw <- as.matrix(X)
   Z_raw <- .ensure_intercept(Z, n)
   full_preprocessing <- .fit_msrrr_preprocessing(
-    Y_raw, X_raw, Z_raw, family, familygroup
+    Y_raw, X_raw, Z_raw, family, familygroup,
+    X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
   )
   Y <- full_preprocessing$Y
   X <- full_preprocessing$X
@@ -1464,7 +1512,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
         Y_raw[training_rows, , drop = FALSE],
         X_raw[training_rows, , drop = FALSE],
         Z_raw[training_rows, , drop = FALSE],
-        family, familygroup
+        family, familygroup,
+        X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
       )
       validation_data <- .apply_msrrr_preprocessing(
         fold_preprocessing$parameters,
@@ -1531,6 +1580,7 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
               method=method, cv.criteria=cv.criteria, foldid=foldid, nfold=nfold, c.BIC=c.BIC, # c('CV', 'BIC', 'BICP', 'AIC', 'GIC'), 
               Tunepath = Tunepath, lam.idx = lam.idx, lam.opt = lam.opt, tunepath.opt = tunepath.opt,
               refit.init = refit.init, control = control, family = family, familygroup = familygroup,
+              X_no_scale = X_no_scale, Z_no_scale = Z_no_scale,
               preprocessing = full_preprocessing$parameters,
               fit = fit, A=fit$A, V=fit$V, B=fit$B, C=fit$C)
   if (method == "CV") {
@@ -1550,7 +1600,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
                  method='CV', cv.criteria='pMSE', foldid=NULL, nfold=5, c.BIC=2, 
                  # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
                  control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T),
-                 diagnostics=TRUE, progress=TRUE){
+                 diagnostics=TRUE, progress=TRUE,
+                 X_no_scale = NULL, Z_no_scale = NULL){
   n = nrow(X)
   spec <- .validate_family_spec(Y, family, familygroup)
   familygroup <- spec$familygroup
@@ -1568,6 +1619,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
 
   # 6) Add an intercept only if it is not already present.
   Z <- .ensure_intercept(Z, n)
+  X_no_scale <- .validate_no_scale_columns(X, X_no_scale, "X_no_scale")
+  Z_no_scale <- .validate_no_scale_columns(Z, Z_no_scale, "Z_no_scale")
 
   # pz = ncol(Z)
   nr = length(nrankseq)
@@ -1617,9 +1670,12 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   }
   for(ir in 1:nr){
     if(control$trace==T) cat(ir)
-    out.allrank[[ir]] = msrrr_cv.tuning(Y, X, Z, family, familygroup, nrankseq[ir], init, lamseq, 
-                                     nlam, warm, method, cv.criteria, foldid, nfold, c.BIC, control,
-                                     progress_callback = progress_callback)
+    out.allrank[[ir]] = msrrr_cv.tuning(
+      Y, X, Z, family, familygroup, nrankseq[ir], init, lamseq,
+      nlam, warm, method, cv.criteria, foldid, nfold, c.BIC, control,
+      progress_callback = progress_callback,
+      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
+    )
   }
   names(out.allrank) = paste0('nrank_', nrankseq)
   Tunepath = lapply(out.allrank, function(a) a$Tunepath)
@@ -1650,6 +1706,11 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
 ## scales. When diagnostics=TRUE, every captured message/warning is retained in
 ## object$diagnostics. A compact audit is printed once, after fitting, by
 ## default. Supplying diagnostics_file additionally writes that table to disk.
+## X_no_scale and Z_no_scale are optional character vectors containing exact
+## column names that must remain on their original scale. NULL preserves the
+## standard v4 preprocessing rule. For historical HELIX reproduction, derive
+## these vectors before fitting using the <7-distinct-values rule; this column
+## classification is then held fixed across all CV folds.
 msrrr_cv <- function(
     Y, X, Z = NULL, family, familygroup = NULL, nrankseq = c(1:3),
     init = NULL, lamseq = NULL, nlam = 50, warm = FALSE,
@@ -1660,7 +1721,9 @@ msrrr_cv <- function(
     diagnostics = TRUE,
     print_diagnostics_at_end = TRUE,
     diagnostics_file = NULL,
-    progress = TRUE) {
+    progress = TRUE,
+    X_no_scale = NULL,
+    Z_no_scale = NULL) {
   diagnostic_log <- data.frame(
     condition = character(),
     text = character(),
@@ -1675,7 +1738,8 @@ msrrr_cv <- function(
       lamseq = lamseq, nlam = nlam, warm = warm,
       method = method, cv.criteria = cv.criteria,
       foldid = foldid, nfold = nfold, c.BIC = c.BIC,
-      control = control, diagnostics = diagnostics, progress = progress
+      control = control, diagnostics = diagnostics, progress = progress,
+      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
     )
   }
 
@@ -1858,8 +1922,11 @@ refit_msrrr <- function(object, Y, X, Z = NULL, init = object$refit.init,
     Y <- as.matrix(Y)
     X <- as.matrix(X)
     Z <- .ensure_intercept(Z, nrow(Y))
+    X_no_scale <- object$preprocessing$X$no_scale_names
+    Z_no_scale <- object$preprocessing$Z$no_scale_names
     transformed <- .fit_msrrr_preprocessing(
-      Y, X, Z, object$family, object$familygroup
+      Y, X, Z, object$family, object$familygroup,
+      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
     )
     Y <- transformed$Y
     X <- transformed$X
@@ -2009,8 +2076,12 @@ refit_msrrr_unpenalized <- function(
   ensure_intercept <- TRUE
   if (!is.null(object$preprocessing)) {
     Z <- .ensure_intercept(Z, nrow(Y))
+    stored_X_no_scale <- object$preprocessing$X$no_scale_names
+    X_no_scale <- intersect(stored_X_no_scale, colnames(X_selected))
+    Z_no_scale <- object$preprocessing$Z$no_scale_names
     transformed <- .fit_msrrr_preprocessing(
-      Y, X_selected, Z, object_family, object_familygroup
+      Y, X_selected, Z, object_family, object_familygroup,
+      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
     )
     Y <- transformed$Y
     X_selected <- transformed$X
