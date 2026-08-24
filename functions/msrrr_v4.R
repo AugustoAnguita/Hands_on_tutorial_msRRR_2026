@@ -353,27 +353,37 @@ require(rrpack)
       call. = FALSE
     )
   }
-  if (object$nrank.opt == max_rank && max_rank < max_feasible_rank) {
-    warning(
-      "The selected rank (", object$nrank.opt,
-      ") is the largest value tested. Consider extending nrankseq upward ",
-      "and refitting with the same CV folds. The maximum feasible rank is ",
-      max_feasible_rank, ".",
-      call. = FALSE
-    )
-  }
-
   active_in_selected_model <- count_selected_exposures(
     object$fit$B, tol = tol
   )
-  if (active_in_selected_model < object$nrank.opt) {
+  effective_rank <- effective_rank_msrrr(object$fit$B)
+  at_upper_boundary <- object$nrank.opt == max_rank &&
+    max_rank < max_feasible_rank
+  if (at_upper_boundary && effective_rank < object$nrank.opt) {
     warning(
-      "The final penalised model selects ", active_in_selected_model,
-      " exposure(s), fewer than its selected rank (", object$nrank.opt,
-      "). Its coefficient matrix can therefore have effective rank at most ",
-      active_in_selected_model,
-      ", so one or more latent components are redundant. Consider including ",
-      "lower ranks in nrankseq and reviewing the CV results.",
+      "The CV-selected candidate rank is the largest tested value (",
+      object$nrank.opt, "), so rank ", max_rank + 1L,
+      " could be evaluated to rule out an upper-boundary optimum. However, ",
+      "the selected model contains ", active_in_selected_model,
+      " active exposure(s) and has effective rank ", effective_rank,
+      ". Inspect lower-rank solutions and their CV performance before ",
+      "interpreting the boundary result as evidence for a higher-dimensional ",
+      "latent structure.", call. = FALSE
+    )
+  } else if (at_upper_boundary) {
+    warning(
+      "The CV-selected candidate rank (", object$nrank.opt,
+      ") is the largest value tested. Consider evaluating rank ",
+      max_rank + 1L, " to rule out an upper-boundary optimum. The maximum ",
+      "feasible rank is ", max_feasible_rank, ".", call. = FALSE
+    )
+  } else if (effective_rank < object$nrank.opt) {
+    warning(
+      "The CV-selected candidate rank is ", object$nrank.opt,
+      ", while the final coefficient matrix has effective rank ",
+      effective_rank, " and selects ", active_in_selected_model,
+      " exposure(s). Review lower-rank solutions with comparable CV ",
+      "performance before interpreting the nominal rank as latent dimension.",
       call. = FALSE
     )
   }
@@ -640,6 +650,32 @@ count_selected_exposures <- function(model_or_B,
   sum(sqrt(rowSums(B^2)) > tol)
 }
 
+## Numerical rank of B.  This deliberately uses the conventional relative
+## matrix-rank tolerance, max(dim(B)) * eps * max(singular value), rather than
+## the row-selection tolerance used by the group penalty.
+effective_rank_msrrr <- function(model_or_B, tol = NULL) {
+  B <- if (is.matrix(model_or_B)) {
+    model_or_B
+  } else if (!is.null(model_or_B$fit$B)) {
+    model_or_B$fit$B
+  } else if (!is.null(model_or_B$B)) {
+    model_or_B$B
+  } else {
+    stop("Provide a coefficient matrix B or an msrrr/msrrr.fit object.")
+  }
+  B <- as.matrix(B)
+  singular_values <- svd(B, nu = 0, nv = 0)$d
+  if (!length(singular_values) || !is.finite(singular_values[1L]) ||
+      singular_values[1L] == 0) return(0L)
+  if (is.null(tol)) {
+    tol <- max(dim(B)) * .Machine$double.eps * singular_values[1L]
+  }
+  if (length(tol) != 1L || is.na(tol) || !is.finite(tol) || tol < 0) {
+    stop("tol must be one finite non-negative absolute singular-value tolerance.")
+  }
+  as.integer(sum(singular_values > tol))
+}
+
 
 ## matrix row-wise 2_1 norm for group sparsity 
 norm21 <- function(A) {
@@ -709,11 +745,58 @@ pmse <- function(Y, mu, Phi=NULL, family, familygroup = NULL) {
 }
 
 
+## Ridge initialisation control and compact internal-GLM diagnostics.
+.validate_ridge_init_lambda <- function(ridge_init_lambda) {
+  if (length(ridge_init_lambda) != 1L || is.na(ridge_init_lambda) ||
+      !is.finite(ridge_init_lambda) || ridge_init_lambda < 0) {
+    stop("ridge_init_lambda must be one finite non-negative value.")
+  }
+  as.numeric(ridge_init_lambda)
+}
+
+.empty_glm_warning_log <- function() {
+  data.frame(
+    outcome_index = integer(), outcome = character(), warning = character(),
+    count = integer(), stringsAsFactors = FALSE
+  )
+}
+
+.aggregate_internal_glm_warnings <- function(outcome_index, warning_message, outcome_names) {
+  if (!length(warning_message)) return(.empty_glm_warning_log())
+  raw <- data.frame(
+    outcome_index = as.integer(outcome_index),
+    outcome = outcome_names[as.integer(outcome_index)],
+    warning = as.character(warning_message),
+    count = 1L, stringsAsFactors = FALSE
+  )
+  stats::aggregate(
+    count ~ outcome_index + outcome + warning, data = raw, FUN = sum
+  )
+}
+
+.format_internal_glm_warning_summary <- function(log) {
+  if (is.null(log) || !is.data.frame(log) || nrow(log) == 0L) return(NULL)
+  total <- sum(log$count)
+  by_outcome <- stats::aggregate(count ~ outcome, data = log, FUN = sum)
+  by_outcome <- by_outcome[order(-by_outcome$count, by_outcome$outcome), , drop = FALSE]
+  outcome_text <- paste0(
+    by_outcome$outcome, " (n = ", by_outcome$count, ")", collapse = ", "
+  )
+  warning_text <- paste(unique(log$warning), collapse = " | ")
+  paste0(
+    "Internal glm() covariate-update steps generated ", total,
+    " warning occurrence(s), captured and aggregated rather than printed ",
+    "repeatedly. Affected outcomes: ", outcome_text,
+    ". Warning type(s): ", warning_text,
+    ". Inspect object$glm_warning_log for rank/fold/lambda details."
+  )
+}
+
 ## msrrr fit with prespecified nrank and lambda
 # Z may be supplied with or without an intercept column
 msrrr.fit <- function(Y, X, Z, family, familygroup = NULL, nrank = 2, lambda, init = NULL,
                       control = list(epsilon = 1e-4, maxit = 200, trace = F),
-                      ensure_intercept = TRUE) {
+                      ensure_intercept = TRUE, ridge_init_lambda = 0.03) {
   
   n = nrow(Y)
   q = ncol(Y)
@@ -733,6 +816,11 @@ msrrr.fit <- function(Y, X, Z, family, familygroup = NULL, nrank = 2, lambda, in
   Y_mis = Y
   id.mis = which(is.na(Y))
   r = nrank
+  ridge_init_lambda <- .validate_ridge_init_lambda(ridge_init_lambda)
+  outcome_names <- colnames(Y)
+  if (is.null(outcome_names)) outcome_names <- paste0("Y", seq_len(q))
+  glm_warning_outcomes <- integer()
+  glm_warning_messages <- character()
   
   ## get init values via ridge
   if (is.null(init$A0)) {  # use ridge to get init working Y
@@ -751,7 +839,7 @@ msrrr.fit <- function(Y, X, Z, family, familygroup = NULL, nrank = 2, lambda, in
         # binomial() object triggers a spurious fractional-success warning.
         family = fg[[iq]]$family,
         alpha = 0,
-        lambda = 0.03,
+        lambda = ridge_init_lambda,
         intercept = F,
         penalty.factor = c(rep(0, pz), rep(1, p))
       )
@@ -872,10 +960,17 @@ msrrr.fit <- function(Y, X, Z, family, familygroup = NULL, nrank = 2, lambda, in
     for (iq in 1:q) {
       # cat('.')
       # fine to use glm here as Z is low-d
-      fit0 <- glm(
-        Y_mis[, iq] ~ 0 + Z,
-        offset = X %*% B[, iq],
-        family = fg[[iq]]
+      fit0 <- withCallingHandlers(
+        glm(
+          Y_mis[, iq] ~ 0 + Z,
+          offset = X %*% B[, iq],
+          family = fg[[iq]]
+        ),
+        warning = function(w) {
+          glm_warning_outcomes <<- c(glm_warning_outcomes, iq)
+          glm_warning_messages <<- c(glm_warning_messages, conditionMessage(w))
+          invokeRestart("muffleWarning")
+        }
       )
       
       C[, iq] = fit0$coef
@@ -927,6 +1022,9 @@ msrrr.fit <- function(Y, X, Z, family, familygroup = NULL, nrank = 2, lambda, in
   A = A / kappa
   B = B / kappa
   C = C / kappa
+  glm_warning_log <- .aggregate_internal_glm_warnings(
+    glm_warning_outcomes, glm_warning_messages, outcome_names
+  )
   
   return(
     list(
@@ -945,7 +1043,9 @@ msrrr.fit <- function(Y, X, Z, family, familygroup = NULL, nrank = 2, lambda, in
       # 12) Report whether the stopping criterion was reached.
       converged = isTRUE(abs(dif[iter]) < control$epsilon),
       final_relative_obj_change = dif[iter],
-      init_used = init_used
+      init_used = init_used,
+      ridge_init_lambda = ridge_init_lambda,
+      glm_warning_log = glm_warning_log
     )
   )
 }
@@ -1326,7 +1426,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
                         # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
                         control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T),
                         progress_callback = NULL,
-                        X_no_scale = NULL, Z_no_scale = NULL){
+                        X_no_scale = NULL, Z_no_scale = NULL,
+                        ridge_init_lambda = 0.03){
   n = nrow(Y)
   q = ncol(Y)
   p = ncol(X)
@@ -1350,7 +1451,22 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   pz = ncol(Z) 
   Y_mis = Y_raw
   id.mis = which(is.na(Y))
-  r = nrank  
+  r = nrank
+  ridge_init_lambda <- .validate_ridge_init_lambda(ridge_init_lambda)
+  glm_warning_logs <- list()
+  append_glm_warning_log <- function(fit_object, phase, fold = NA_integer_,
+                                     lambda_value = NA_real_) {
+    log <- fit_object$glm_warning_log
+    if (is.null(log) || !is.data.frame(log) || nrow(log) == 0L) {
+      return(invisible(NULL))
+    }
+    log$nrank <- as.integer(nrank)
+    log$phase <- as.character(phase)
+    log$fold <- as.integer(fold)
+    log$lambda <- as.numeric(lambda_value)
+    glm_warning_logs[[length(glm_warning_logs) + 1L]] <<- log
+    invisible(NULL)
+  }
   
   ## distribution families ##
   nfamily <- length(family)
@@ -1410,11 +1526,22 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   # 14) Store candidate and applied kappa values for later diagnosis.
   Kappapath = matrix(NA_real_, nrow = nlam, ncol = q)
   kappapath = rep(NA_real_, nlam)
+  n_selected_path <- integer(nlam)
+  effective_rank_path <- integer(nlam)
+  cold_path_init <- init
   for(il in 1:nlam){
     if(control$trace==T) cat(il,'...')
-    init.i = init 
-    if(il!=1 & warm==T) init.i=list(A0=fit$A, V0=fit$V, C0=fit$C, kappa=fit$kappa)
-    fit = msrrr.fit(Y, X, Z, family, familygroup, nrank, lamseq[il], init.i, control)
+    if (warm && il != 1L) {
+      init.i <- list(A0=fit$A, V0=fit$V, C0=fit$C, kappa=fit$kappa)
+    } else {
+      init.i <- cold_path_init
+    }
+    fit = msrrr.fit(
+      Y, X, Z, family, familygroup, nrank, lamseq[il], init.i, control,
+      ridge_init_lambda = ridge_init_lambda
+    )
+    if (!warm && il == 1L) cold_path_init <- fit$init_used
+    append_glm_warning_log(fit, "development_path", lambda_value = lamseq[il])
     if (!is.null(progress_callback)) progress_callback()
     Apath[il,,] = fit$A
     Vpath[il,,] = fit$V
@@ -1423,6 +1550,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
     mupath[il,,] = fit$mu
     Kappapath[il,] = fit$Kappa
     kappapath[il] = fit$kappa
+    n_selected_path[il] <- count_selected_exposures(fit$B)
+    effective_rank_path[il] <- effective_rank_msrrr(fit$B)
   }
   
   ## tuning
@@ -1528,9 +1657,21 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
       X_test <- validation_data$X
       Z_test <- validation_data$Z
       mu_test <- matrix(NA, sum(foldid==ifold), q)
+      cold_fold_init <- init
       for (il in 1:nlam) {
-        if(il!=1 & warm==T) init.i =list(A0=fit1$A, V0=fit1$V, C0=fit1$C, kappa=fit1$kappa)
-        fit1 <- msrrr.fit(Y_train, X_train, Z_train, family, familygroup, nrank, lamseq[il], init.i, control)
+        if (warm && il != 1L) {
+          init.i <- list(A0=fit1$A, V0=fit1$V, C0=fit1$C, kappa=fit1$kappa)
+        } else {
+          init.i <- cold_fold_init
+        }
+        fit1 <- msrrr.fit(
+          Y_train, X_train, Z_train, family, familygroup, nrank,
+          lamseq[il], init.i, control, ridge_init_lambda = ridge_init_lambda
+        )
+        if (!warm && il == 1L) cold_fold_init <- fit1$init_used
+        append_glm_warning_log(
+          fit1, "cv", fold = ifold, lambda_value = lamseq[il]
+        )
         if (!is.null(progress_callback)) progress_callback()
         cv.Kappapath[il, ifold, ] <- fit1$Kappa
         cv.kappapath[il, ifold] <- fit1$kappa
@@ -1553,8 +1694,9 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   lam.opt = lamseq[lam.idx] 
   
   ## refit
-  # 5) Preserve a supplied init when no path warm start is available.
-  refit.init <- init
+  # With cold starts, reuse the same deterministic whole-development
+  # initialisation used independently for every lambda in the path.
+  refit.init <- if (!warm) cold_path_init else init
   
   if (lam.idx > 1 & warm == T) {
     # 1) Restore A, V and C matrix shapes before the final refit.
@@ -1567,21 +1709,40 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   
   fit = msrrr.fit(
     Y, X, Z, family, familygroup,
-    nrank, lam.opt, refit.init, control
+    nrank, lam.opt, refit.init, control,
+    ridge_init_lambda = ridge_init_lambda
   )
+  append_glm_warning_log(fit, "final_refit", lambda_value = lam.opt)
   if (!is.null(progress_callback)) progress_callback()
 
   # 5) Expose the exact matrix-valued initialisation actually used.
   refit.init <- fit$init_used
+  glm_warning_log <- if (length(glm_warning_logs)) {
+    do.call(rbind, glm_warning_logs)
+  } else {
+    data.frame(
+      outcome_index = integer(), outcome = character(), warning = character(),
+      count = integer(), nrank = integer(), phase = character(),
+      fold = integer(), lambda = numeric(), stringsAsFactors = FALSE
+    )
+  }
   
   out <- list(lamseq=lamseq, nrank=nrank, Apath=Apath, Vpath=Vpath, Cpath=Cpath,
               phipath=phipath, mupath=mupath, Kappapath=Kappapath,
               kappapath=kappapath,
+              n_selected_path=n_selected_path,
+              effective_rank_path=effective_rank_path,
               method=method, cv.criteria=cv.criteria, foldid=foldid, nfold=nfold, c.BIC=c.BIC, # c('CV', 'BIC', 'BICP', 'AIC', 'GIC'), 
               Tunepath = Tunepath, lam.idx = lam.idx, lam.opt = lam.opt, tunepath.opt = tunepath.opt,
               refit.init = refit.init, control = control, family = family, familygroup = familygroup,
               X_no_scale = X_no_scale, Z_no_scale = Z_no_scale,
               preprocessing = full_preprocessing$parameters,
+              ridge_init_lambda = ridge_init_lambda,
+              glm_warning_log = glm_warning_log,
+              n_selected = count_selected_exposures(fit$B),
+              effective_rank = effective_rank_msrrr(fit$B),
+              max_feasible_rank_full = min(p, q),
+              max_feasible_rank_selected = min(count_selected_exposures(fit$B), q),
               fit = fit, A=fit$A, V=fit$V, B=fit$B, C=fit$C)
   if (method == "CV") {
     out$cv.Kappapath <- cv.Kappapath
@@ -1601,7 +1762,9 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
                  # c('CV', 'BIC', 'BICP', 'AIC', 'GIC')
                  control=list(epsilon=1e-4, maxit=200, trace=F, conv.obj=T),
                  diagnostics=TRUE, progress=TRUE,
-                 X_no_scale = NULL, Z_no_scale = NULL){
+                 X_no_scale = NULL, Z_no_scale = NULL,
+                 ridge_init_lambda = 0.03,
+                 suggest_parsimonious = FALSE){
   n = nrow(X)
   spec <- .validate_family_spec(Y, family, familygroup)
   familygroup <- spec$familygroup
@@ -1674,7 +1837,8 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
       Y, X, Z, family, familygroup, nrankseq[ir], init, lamseq,
       nlam, warm, method, cv.criteria, foldid, nfold, c.BIC, control,
       progress_callback = progress_callback,
-      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
+      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale,
+      ridge_init_lambda = ridge_init_lambda
     )
   }
   names(out.allrank) = paste0('nrank_', nrankseq)
@@ -1688,8 +1852,66 @@ msrrr_cv.tuning <- function(Y, X, Z, family, familygroup = NULL, nrank=2, init=N
   out$Tunepath = Tunepath
   out$tunepath.opt = tunepath.opt
   out$nrank.opt = nrankseq[idx]
+  out$n_selected.opt <- out$n_selected
+  out$effective_rank.opt <- out$effective_rank
+  out$max_feasible_rank_full <- min(ncol(X), ncol(Y))
+  out$max_feasible_rank_selected.opt <- min(out$n_selected.opt, ncol(Y))
   out$family = family
   out$familygroup = familygroup
+  all_glm_logs <- lapply(out.allrank, function(x) x$glm_warning_log)
+  all_glm_logs <- all_glm_logs[vapply(all_glm_logs, function(x) {
+    is.data.frame(x) && nrow(x) > 0L
+  }, logical(1))]
+  out$glm_warning_log <- if (length(all_glm_logs)) {
+    do.call(rbind, all_glm_logs)
+  } else {
+    data.frame(
+      outcome_index = integer(), outcome = character(), warning = character(),
+      count = integer(), nrank = integer(), phase = character(),
+      fold = integer(), lambda = numeric(), stringsAsFactors = FALSE
+    )
+  }
+  out$ridge_init_lambda <- ridge_init_lambda
+  out$parsimonious_suggestion <- NULL
+  if (isTRUE(suggest_parsimonious)) {
+    candidates <- do.call(rbind, lapply(out.allrank, function(rank_object) {
+      data.frame(
+        candidate_rank = as.integer(rank_object$nrank),
+        lambda = rank_object$lamseq,
+        cv_mean = rank_object$Tunepath$cv.mean,
+        n_selected = rank_object$n_selected_path,
+        effective_rank = rank_object$effective_rank_path
+      )
+    }))
+    best_rank_object <- out.allrank[[idx]]
+    best_lambda_index <- best_rank_object$lam.idx
+    fold_columns <- seq_len(best_rank_object$nfold)
+    fold_errors <- as.numeric(best_rank_object$Tunepath[best_lambda_index, fold_columns])
+    se_min <- stats::sd(fold_errors) / sqrt(length(fold_errors))
+    if (!is.finite(se_min)) se_min <- 0
+    cv_min <- min(candidates$cv_mean)
+    admissible <- candidates[candidates$cv_mean <= cv_min + se_min, , drop = FALSE]
+    chosen <- admissible[order(admissible$candidate_rank, -admissible$lambda,
+                               admissible$cv_mean), , drop = FALSE][1L, ]
+    chosen$delta_cv <- chosen$cv_mean - cv_min
+    chosen$delta_cv_pct <- if (cv_min == 0) NA_real_ else 100 * chosen$delta_cv / cv_min
+    chosen$SE_min <- se_min
+    chosen$max_feasible_rank_selected <- min(chosen$n_selected, ncol(Y))
+    rank_object <- out.allrank[[which(nrankseq == chosen$candidate_rank)[1L]]]
+    lambda_index <- which.min(abs(rank_object$lamseq - chosen$lambda))
+    B_chosen <- .as_matrix_dim(rank_object$Apath[lambda_index, , ], ncol(X),
+                               chosen$candidate_rank) %*%
+      t(.as_matrix_dim(rank_object$Vpath[lambda_index, , ], ncol(Y),
+                       chosen$candidate_rank))
+    B_best <- out$B
+    chosen_set <- which(sqrt(rowSums(B_chosen^2)) > .msrrr_selection_tol)
+    best_set <- which(sqrt(rowSums(B_best^2)) > .msrrr_selection_tol)
+    union_set <- union(chosen_set, best_set)
+    chosen$selected_exposures <- paste(colnames(X)[chosen_set], collapse = "; ")
+    chosen$Jaccard_vs_CV_optimum <- if (!length(union_set)) 1 else
+      length(intersect(chosen_set, best_set)) / length(union_set)
+    out$parsimonious_suggestion <- chosen
+  }
   out$call <- match.call()
   # 9) Preserve the class after selecting the optimal rank.
   class(out) <- "msrrr"
@@ -1723,7 +1945,9 @@ msrrr_cv <- function(
     diagnostics_file = NULL,
     progress = TRUE,
     X_no_scale = NULL,
-    Z_no_scale = NULL) {
+    Z_no_scale = NULL,
+    ridge_init_lambda = 0.03,
+    suggest_parsimonious = FALSE) {
   diagnostic_log <- data.frame(
     condition = character(),
     text = character(),
@@ -1739,7 +1963,9 @@ msrrr_cv <- function(
       method = method, cv.criteria = cv.criteria,
       foldid = foldid, nfold = nfold, c.BIC = c.BIC,
       control = control, diagnostics = diagnostics, progress = progress,
-      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale
+      X_no_scale = X_no_scale, Z_no_scale = Z_no_scale,
+      ridge_init_lambda = ridge_init_lambda,
+      suggest_parsimonious = suggest_parsimonious
     )
   }
 
@@ -1770,6 +1996,16 @@ msrrr_cv <- function(
       }
     )
     diagnostic_log <- unique(diagnostic_log)
+    glm_summary <- .format_internal_glm_warning_summary(object$glm_warning_log)
+    if (!is.null(glm_summary)) {
+      diagnostic_log <- unique(rbind(
+        diagnostic_log,
+        data.frame(
+          condition = "warning", text = glm_summary,
+          stringsAsFactors = FALSE
+        )
+      ))
+    }
   } else {
     object <- fit_call()
   }
@@ -1905,7 +2141,9 @@ predict.msrrr <- function(object, X.new, Z.new = NULL, Y.new = NULL,
 ## intercept handling, control settings and initial values.
 ## This is the recommended comparison with object$fit.
 refit_msrrr <- function(object, Y, X, Z = NULL, init = object$refit.init,
-                        control = object$control) {
+                        control = object$control,
+                        ridge_init_lambda = if (!is.null(object$ridge_init_lambda))
+                          object$ridge_init_lambda else 0.03) {
   if (is.null(object$nrank) || is.null(object$lam.opt)) {
     stop("object must be returned by msrrr() or msrrr.tuning().")
   }
@@ -1945,7 +2183,8 @@ refit_msrrr <- function(object, Y, X, Z = NULL, init = object$refit.init,
     lambda = object$lam.opt,
     init = init,
     control = control,
-    ensure_intercept = ensure_intercept
+    ensure_intercept = ensure_intercept,
+    ridge_init_lambda = ridge_init_lambda
   )
 
   # Preserve the tuning metadata needed by optional downstream refits.
@@ -1955,6 +2194,7 @@ refit_msrrr <- function(object, Y, X, Z = NULL, init = object$refit.init,
   fit$familygroup <- object$familygroup
   fit$control <- control
   fit$preprocessing <- preprocessing
+  fit$ridge_init_lambda <- ridge_init_lambda
   class(fit) <- unique(c("msrrr_refit", class(fit)))
   fit
 }
@@ -1967,7 +2207,9 @@ refit_msrrr_unpenalized <- function(
     tol = .msrrr_selection_tol,
     nrank = object$nrank,
     init = NULL,
-    control = object$control) {
+    control = object$control,
+    ridge_init_lambda = if (!is.null(object$ridge_init_lambda))
+      object$ridge_init_lambda else 0.03) {
 
   penalized_fit <- if (!is.null(object$B)) {
     object
@@ -2037,6 +2279,7 @@ refit_msrrr_unpenalized <- function(
       family = object_family,
       familygroup = object_familygroup,
       control = control,
+      ridge_init_lambda = ridge_init_lambda,
       preprocessing = NULL,
       init = init,
       penalized_lambda = if (!is.null(object$lambda)) object$lambda else object$lam.opt,
@@ -2100,7 +2343,8 @@ refit_msrrr_unpenalized <- function(
     lambda = 0,
     init = init,
     control = control,
-    ensure_intercept = ensure_intercept
+    ensure_intercept = ensure_intercept,
+    ridge_init_lambda = ridge_init_lambda
   )
 
   exposure_names <- colnames(X)
@@ -2124,6 +2368,7 @@ refit_msrrr_unpenalized <- function(
     family = object_family,
     familygroup = object_familygroup,
     control = control,
+    ridge_init_lambda = ridge_init_lambda,
     preprocessing = preprocessing,
     init = init,
     penalized_lambda = if (!is.null(object$lambda)) {
