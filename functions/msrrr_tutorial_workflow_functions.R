@@ -14,6 +14,190 @@ make_progress_callback <- function(progress_bar) {
   function(n) utils::setTxtProgressBar(progress_bar, n)
 }
 
+
+# ---------------------------------------------------------------------------
+# Rank x lambda diagnostics
+# ---------------------------------------------------------------------------
+# Kept in the main workflow helper so users do not need to distribute a
+# separate diagnostics script. These functions only extract and plot existing
+# msrrr_cv results; they do not fit models or alter the selection rule.
+
+.rank_lambda_effective_rank <- function(B) {
+  if (exists("effective_rank_msrrr", mode = "function")) {
+    return(effective_rank_msrrr(B))
+  }
+  d <- svd(B, nu = 0, nv = 0)$d
+  if (!length(d) || !is.finite(d[1L]) || d[1L] == 0) return(0L)
+  as.integer(sum(d > max(dim(B)) * .Machine$double.eps * d[1L]))
+}
+
+extract_msrrr_rank_lambda_solutions <- function(
+    object, exposure_names = NULL, selection_tol = 1e-8,
+    include_parsimonious = TRUE) {
+  rank_objects <- object$out.allrank
+  if (is.null(rank_objects)) rank_objects <- list(object)
+  p <- dim(rank_objects[[1L]]$Apath)[2L]
+  q <- dim(rank_objects[[1L]]$Vpath)[2L]
+  if (is.null(exposure_names)) exposure_names <- paste0("X", seq_len(p))
+  if (length(exposure_names) != p) {
+    stop("exposure_names must have one name per X column.")
+  }
+
+  rows <- list()
+  k <- 0L
+  for (rank_object in rank_objects) {
+    rank <- as.integer(rank_object$nrank)
+    cv_mean <- rank_object$Tunepath$cv.mean
+    for (i in seq_along(rank_object$lamseq)) {
+      A <- matrix(rank_object$Apath[i, , ], nrow = p, ncol = rank)
+      V <- matrix(rank_object$Vpath[i, , ], nrow = q, ncol = rank)
+      B <- A %*% t(V)
+      selected <- exposure_names[sqrt(rowSums(B^2)) > selection_tol]
+      k <- k + 1L
+      rows[[k]] <- data.frame(
+        Candidate_rank = rank,
+        Lambda = rank_object$lamseq[i],
+        CV_error = cv_mean[i],
+        N_selected = length(selected),
+        Effective_rank = .rank_lambda_effective_rank(B),
+        Selected_exposures = paste(selected, collapse = "; "),
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+  tab <- do.call(rbind, rows)
+  best <- which.min(tab$CV_error)
+  tab$Delta_error <- tab$CV_error - tab$CV_error[best]
+  tab$Delta_pct <- if (tab$CV_error[best] == 0) NA_real_ else
+    100 * tab$Delta_error / tab$CV_error[best]
+  tab$Is_CV_optimum <- seq_len(nrow(tab)) == best
+  tab$Is_parsimonious_suggestion <- FALSE
+
+  if (isTRUE(include_parsimonious) && identical(object$method, "CV")) {
+    best_rank <- rank_objects[[which(vapply(
+      rank_objects, function(x) as.integer(x$nrank), integer(1)
+    ) == tab$Candidate_rank[best])[1L]]]
+    best_lambda <- which.min(abs(best_rank$lamseq - tab$Lambda[best]))
+    fold_errors <- as.numeric(
+      best_rank$Tunepath[best_lambda, seq_len(best_rank$nfold)]
+    )
+    se_min <- stats::sd(fold_errors) / sqrt(length(fold_errors))
+    if (!is.finite(se_min)) se_min <- 0
+    admissible <- which(tab$CV_error <= tab$CV_error[best] + se_min)
+    pars <- admissible[order(
+      tab$Candidate_rank[admissible],
+      -tab$Lambda[admissible],
+      tab$CV_error[admissible]
+    )][1L]
+    tab$Is_parsimonious_suggestion[pars] <- TRUE
+    attr(tab, "SE_min") <- se_min
+  }
+  tab
+}
+
+plot_msrrr_rank_lambda_diagnostics <- function(
+    solution_table, model_label = "msRRR", mark_parsimonious = TRUE) {
+  if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    stop("Package ggplot2 is required.")
+  }
+  tab <- solution_table
+  tab$Rank_factor <- factor(tab$Candidate_rank)
+  pars_flag <- if (isTRUE(mark_parsimonious)) {
+    tab$Is_parsimonious_suggestion
+  } else {
+    FALSE
+  }
+  tab$Solution_marker <- factor(
+    ifelse(tab$Is_CV_optimum & pars_flag,
+      "CV optimum = parsimonious suggestion",
+      ifelse(tab$Is_CV_optimum, "CV optimum",
+        ifelse(pars_flag, "1-SE-style parsimonious suggestion", NA_character_)
+      )
+    ),
+    levels = c(
+      "CV optimum", "1-SE-style parsimonious suggestion",
+      "CV optimum = parsimonious suggestion"
+    )
+  )
+  marked <- tab[!is.na(tab$Solution_marker), , drop = FALSE]
+  historical_current <- if (
+      "Historical_hyperparameters_current_pipeline" %in% names(tab)) {
+    tab[
+      tab$Historical_hyperparameters_current_pipeline %in% TRUE,
+      , drop = FALSE
+    ]
+  } else {
+    tab[FALSE, , drop = FALSE]
+  }
+  shapes <- c(
+    "CV optimum" = 8,
+    "1-SE-style parsimonious suggestion" = 17,
+    "CV optimum = parsimonious suggestion" = 23
+  )
+  base <- ggplot2::ggplot(
+    tab,
+    ggplot2::aes(Lambda, colour = Rank_factor, group = Rank_factor)
+  )
+  marker_layer <- ggplot2::geom_point(
+    data = marked,
+    ggplot2::aes(shape = Solution_marker),
+    size = 4,
+    colour = "black"
+  )
+  common <- list(
+    marker_layer,
+    ggplot2::geom_point(
+      data = historical_current,
+      shape = 0, size = 6, colour = "black", stroke = 1.1
+    ),
+    ggplot2::scale_shape_manual(
+      values = shapes, drop = !isTRUE(mark_parsimonious)
+    ),
+    ggplot2::scale_x_log10(),
+    ggplot2::theme_minimal(),
+    ggplot2::labs(
+      colour = "Candidate rank",
+      shape = "Selected solution"
+    )
+  )
+  error_plot <- base +
+    ggplot2::aes(y = CV_error) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::geom_point(size = 0.8) +
+    common +
+    ggplot2::labs(
+      title = paste(model_label, "- CV error across rank and lambda"),
+      x = "Lambda (log10 scale)",
+      y = "Mean CV error",
+      caption = if (isTRUE(mark_parsimonious)) {
+        paste(
+          "Star: CV optimum; triangle: separate 1-SE-style suggestion; diamond: both coincide.",
+          "When present, an open square marks historical hyperparameters evaluated by this pipeline."
+        )
+      } else {
+        paste(
+          "Star: numerical CV optimum.",
+          "When present, an open square marks historical hyperparameters evaluated by this pipeline."
+        )
+      }
+    )
+  selected_plot <- base +
+    ggplot2::aes(y = N_selected) +
+    ggplot2::geom_line(linewidth = 0.5) +
+    ggplot2::geom_point(size = 0.8) +
+    common +
+    ggplot2::labs(
+      title = paste(model_label, "- selected exposures across rank and lambda"),
+      x = "Lambda (log10 scale)",
+      y = "Number of selected exposures",
+      caption = paste(
+        "Symbols identify the same rank-lambda solutions as in the",
+        "CV-error plot."
+      )
+    )
+  list(error = error_plot, n_selected = selected_plot, table = tab)
+}
+
 read_euro_csv <- function(filename) {
   read_delim(filename, delim = ";", 
              locale = locale(decimal_mark = ","), 
